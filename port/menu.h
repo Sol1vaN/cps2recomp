@@ -42,7 +42,9 @@ public:
     Action Press(unsigned buttons);
     // The "Sound" row: the frontend plays nothing while this is set (--mute starts with it set)
     bool muted = false;
+    int players = 2;
     bool hosting = false; // (a match hosted from the Online page, waited for: its row is Stop hosting)
+    bool audioCpuLive = true; // older save states can resume the high-level driver until Reset game
     int Slot() const {
         return m_menu.Slot();
     }

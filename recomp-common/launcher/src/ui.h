@@ -77,7 +77,7 @@ void show_focus();
 bool focus_shown();
 bool gamepad_in_use();
 
-bool button(const char* label, Kind kind, float width = 0.0f, bool enabled = true, float height = 36.0f);
+bool button(const char* label, Kind kind, float width = 0.0f, bool enabled = true, float height = 36.0f, float horizontal_padding = 40.0f);
 bool toggle(const char* id, bool value);
 bool dropdown(const char* id, const std::vector<std::string>& labels, int& index, float width);
 // A field to type in, with a magnifying glass and (when it is not empty) a cross that empties it; Esc empties

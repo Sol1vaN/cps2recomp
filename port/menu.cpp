@@ -3,8 +3,13 @@
 //
 // The in-game menu (menu.h): the shared menu told what a CPS-2 game's is made of.
 #include "menu.h"
+#include "input_profile.h"
+#include "bindings.h"
+#include "tuning.h"
+#include "equalizer.h"
 
 #include <cstring>
+#include <cmath>
 
 #include "../machine/machine.h"
 #include "../runtime/game.h"
@@ -57,6 +62,8 @@ void Menu::Open(bool withStates) {
     }
     config.groups.push_back({
         {recomp::MenuRow::Pages},
+        {recomp::MenuRow::Page, 0, "Controllers"},
+        {recomp::MenuRow::Page, 0, "Slider controls"},
         {recomp::MenuRow::Action, kCoin, "Insert coin", "Puts a coin in the first slot."},
         {recomp::MenuRow::Action, kStart2, "Player 2 joins",
          "Presses player 2's Start: with a coin in (or free play), a second player to practise against."},
@@ -83,24 +90,118 @@ void Menu::Open(bool withStates) {
         }
         config.commands.push_back({command.category, command.title, command.description});
     }
-    config.value = [](size_t feature) { return cps2recomp::FeatureSetting(cps2recomp::TheGame().features[feature].name); };
-    config.setValue = [](size_t feature, int value) { cps2recomp::SetFeatureValue(cps2recomp::TheGame().features[feature].name, value); };
-    // (of a long choice, those the launcher leaves in the menu: settings.ini's [menu], recomp-common/settings.h)
-    {
-        recomp::Ini settings(cps2recomp::SettingsPath());
-        settings.load();
-        std::vector<std::vector<bool>> offered;
-        for (const recomp::FeatureInfo &info : cps2recomp::FeatureList()) {
-            offered.push_back(recomp::MenuChoices(settings, info));
+    LoadCurrentInputProfile(cps2recomp::SettingsPath());
+    const size_t gameFeatures = config.features.size();
+    constexpr size_t fieldsPerPlayer = 18; // neutral, delay, 12 autofire switches, 4 masks
+    config.pages.push_back({"Controllers", "", "Input options for this game only. Assign keys and gamepad buttons on the launcher's Controllers page.", false});
+    std::vector<std::string> delayNames, combinations;
+    for (int n = 1; n <= 30; n++) delayNames.push_back(std::to_string(n) + (n == 1 ? " frame" : " frames"));
+    for (unsigned mask = 0; mask < 64; mask++) combinations.push_back(InputMaskName(mask));
+    for (int player = 0; player < players; player++) {
+        const std::string page = "Player " + std::to_string(player + 1) + " input";
+        config.pages.push_back({page, "Controllers", "Settings are separate for this game and player. Custom buttons press the selected attacks simultaneously.", false});
+        config.features.push_back({page, "Neutralize Opposing Directions (MAME)",
+            "Cancels Left+Right and Up+Down. Left+Down+Right leaves Down."});
+        config.features.push_back({page, "Autofire delay", "This many game frames pressed, then the same number released. The first press is immediate.", delayNames});
+        for (int action = 0; action < kInputAttackActions; action++)
+            config.features.push_back({page, std::string("Autofire: ") + kInputActionTitles[action], "Repeats this button or simultaneous combination while its trigger is held."});
+        for (int custom = 0; custom < kInputCustomCount; custom++)
+            config.features.push_back({page, "Custom " + std::to_string(custom + 1), "Select the buttons pressed together by this Custom trigger. Its key and gamepad binding are in the launcher.", combinations});
+    }
+    LoadCurrentEqualizer(cps2recomp::SettingsPath());
+    const size_t eqFeatures = config.features.size();
+    config.features.push_back({"Equalizer", "Mode", "Bypass leaves the original audio unchanged. Active applies this game's five-band equalizer.", {"Bypass", "Active"}});
+    config.features.push_back({"Equalizer", "Mode", "Low Band: Shelf changes the low end; Peak affects a band around the chosen frequency.", {"Shelf", "Peak"}});
+    config.features.push_back({"Equalizer", "Mode", "High Band: Shelf changes the high end; Peak affects a band around the chosen frequency.", {"Shelf", "Peak"}});
+    recomp::MenuPage eqPage{"Equalizer", "Sound", "Five-band MAMEPPK equalizer for this game only. Applies to board audio and custom soundtrack playback.", false};
+    using Detail = recomp::MenuDetailRow;
+    eqPage.details.push_back({Detail::Feature, eqFeatures});
+    for (size_t band = 0; band < kEqBands; ++band) {
+        eqPage.details.push_back({Detail::Heading, 0, kEqBandNames[band]});
+        if (band == 0 || band == 4) eqPage.details.push_back({Detail::Feature, eqFeatures + (band == 0 ? 1 : 2)});
+        const size_t slider = kTuneCount + band * 3;
+        eqPage.details.push_back({Detail::Slider, slider});
+        eqPage.details.push_back({Detail::Slider, slider + 1, "", [band] {
+            return band == 0 ? !CurrentEqualizer().lowShelf : band == 4 ? !CurrentEqualizer().highShelf : true;
+        }});
+        eqPage.details.push_back({Detail::Slider, slider + 2});
+    }
+    eqPage.details.push_back({Detail::Command, game.commands.size() + 1});
+    config.pages.push_back(std::move(eqPage));
+    LoadCurrentTuning(cps2recomp::SettingsPath());
+    config.pages.push_back({"Slider controls", "", "CPU clocks, video timing and picture controls for this game only.", false});
+    for (const auto &info : kTuning) {
+        config.sliders.push_back({"Slider controls", info.title, info.description, info.suffix,
+                                  info.minimum, info.maximum, info.step, info.usual, info.decimals});
+    }
+    for (size_t band = 0; band < kEqBands; ++band) {
+        const std::string name = kEqBandNames[band];
+        config.sliders.push_back({"Equalizer", "Frequency", name + ": frequency. Clamped below Nyquist at playback's actual sample rate.", " Hz",
+                                  kEqFrequencyMin[band], kEqFrequencyMax[band], 1, kEqFrequencyDefault[band], 0});
+        config.sliders.push_back({"Equalizer", "Q factor", name + ": resonance / bandwidth. Only used in Peak mode.", "", 0.1, 10, 0.01, kEqDefaultQ, 2});
+        config.sliders.push_back({"Equalizer", "Gain", name + ": boost or cut, from -12 to +12 dB. Enter restores 0 dB.", " dB", -12, 12, 0.1, 0, 1, true});
+    }
+    config.sliderValue = [](size_t index) { return index < kTuneCount ? CurrentTuning().values[index] : EqualizerSlider(index - kTuneCount); };
+    config.sliderStep = [](size_t index, double old, int direction, bool coarse) {
+        if (index >= kTuneCount && (index - kTuneCount) % 3 == 0) return EqualizerFrequencyStep((index - kTuneCount) / 3, old, direction, coarse);
+        const double unit = index < kTuneCount ? kTuning[index].step : (index - kTuneCount) % 3 == 1 ? 0.01 : 0.1;
+        return std::round((old + direction * unit * (coarse ? 10 : 1)) / unit) * unit;
+    };
+    config.setSlider = [this](size_t index, double value) {
+        if (index >= kTuneCount) {
+            if (!SetEqualizerSlider(index - kTuneCount, value)) m_menu.Note("Could not save this game's equalizer.");
+            return;
         }
-        config.offered = [offered](size_t feature, int choice) {
-            return feature >= offered.size() || choice < 0 || choice >= static_cast<int>(offered[feature].size()) || offered[feature][static_cast<size_t>(choice)];
+        if (!SetCurrentTuning(index, value)) m_menu.Note("Could not save this game's sliders.");
+        else if (index == static_cast<size_t>(Tune::AudioCpu) && !audioCpuLive && value != 100)
+            m_menu.Note("Reset game to apply the audio CPU clock to this older driver-based save state.");
+    };
+    config.commands.push_back({"Slider controls", "Reset sliders", "Restores the six sliders for this game only. Controls, cheats and global shortcuts are preserved."});
+    config.commands.push_back({"Equalizer", "Reset All", "Restores Active, Shelf bass/treble, the five default frequencies, Q 0.71 and zero gain for this game only."});
+    config.value = [gameFeatures, eqFeatures](size_t feature) {
+        if (feature >= eqFeatures) {
+            const auto &eq = CurrentEqualizer();
+            return feature == eqFeatures ? int(eq.active) : feature == eqFeatures + 1 ? int(!eq.lowShelf) : int(!eq.highShelf);
+        }
+        if (feature < gameFeatures) return cps2recomp::FeatureSetting(cps2recomp::TheGame().features[feature].name);
+        const size_t player = (feature - gameFeatures) / fieldsPerPlayer;
+        const size_t field = (feature - gameFeatures) % fieldsPerPlayer;
+        const auto &one = CurrentInputProfile().players[player];
+        if (field == 0) return one.neutralize ? 1 : 0;
+        if (field == 1) return one.autofireDelay - 1;
+        if (field < 14) return one.autofire[field - 2] ? 1 : 0;
+        return static_cast<int>(one.custom[field - 14]);
+    };
+    config.setValue = [this, gameFeatures, eqFeatures](size_t feature, int value) {
+        if (feature >= eqFeatures) {
+            if (!SetEqualizerFeature(feature - eqFeatures, value)) m_menu.Note("Could not save this game's equalizer.");
+            return;
+        }
+        if (feature < gameFeatures) {
+            cps2recomp::SetFeatureValue(cps2recomp::TheGame().features[feature].name, value);
+            return;
+        }
+        const size_t player = (feature - gameFeatures) / fieldsPerPlayer;
+        const size_t field = (feature - gameFeatures) % fieldsPerPlayer;
+        auto &one = CurrentInputProfile().players[player];
+        if (field == 0) one.neutralize = value != 0;
+        else if (field == 1) one.autofireDelay = std::clamp(value + 1, 1, 30);
+        else if (field < 14) one.autofire[field - 2] = value != 0;
+        else one.custom[field - 14] = static_cast<uint8_t>(std::clamp(value, 0, 63));
+        if (!SaveCurrentInputProfile()) m_menu.Note("Could not save this game's input settings.");
+    };
+    // Retain the official fast and slow speeds, and its favourite-choice filtering.
+    {
+        recomp::Ini settings(cps2recomp::SettingsPath()); settings.load();
+        std::vector<std::vector<bool>> offered;
+        for (const auto &info : cps2recomp::FeatureList()) offered.push_back(recomp::MenuChoices(settings, info));
+        config.offered = [offered](size_t f, int choice) {
+            return f >= offered.size() || choice < 0 || choice >= static_cast<int>(offered[f].size()) || offered[f][choice];
         };
     }
     Speeds(config);
-    config.speedDescription = "Left/Right: slow motion, or faster than the board. While playing, P (or a click of the right stick) stops "
-                              "the game and starts it again; O (or, once stopped, the left trigger) goes on by one frame; - and = change "
-                              "the speed.";
+    config.speedDescription = "Left/Right: slow motion. While playing, P (or a click of the right stick) stops the game and starts it "
+                              "again; O (or, once stopped, the left trigger) goes on by one frame; - and = change the speed.";
     config.muted = [this] { return muted; };
     config.setMuted = [this](bool to) { muted = to; };
     config.confirmName = "Enter or A";
@@ -165,6 +266,16 @@ Menu::Action Menu::Press(unsigned buttons) {
     case recomp::Menu::Chosen::Load: return Action::Load;
     case recomp::Menu::Chosen::Quit: return Action::Quit;
     case recomp::Menu::Chosen::Command:
+        if (static_cast<size_t>(chosen.id) == cps2recomp::TheGame().commands.size() + 1) {
+            if (!ResetCurrentEqualizer()) m_menu.Note("Could not save this game's equalizer.");
+            m_menu.Refresh();
+            return Action::None;
+        }
+        if (static_cast<size_t>(chosen.id) == cps2recomp::TheGame().commands.size()) {
+            CurrentTuning() = Tuning{};
+            if (!SaveCurrentTuning()) m_menu.Note("Could not save this game's sliders.");
+            return Action::None;
+        }
         m_command = static_cast<size_t>(chosen.id);
         return Action::Command;
     case recomp::Menu::Chosen::Action:

@@ -300,7 +300,7 @@ bool LoadRomSet(const std::string &path, const RomList &list, RomSet &set, std::
         }
         std::vector<std::string> zips;
         std::string beside;
-        if (S_ISDIR(info.st_mode)) {
+        if ((info.st_mode & S_IFMT) == S_IFDIR) {
             folder.folder = path;
             beside = path;
         } else {

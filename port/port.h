@@ -10,6 +10,8 @@
 #include "present.h"
 #include "soundtrack.h"
 #include "zoom.h"
+#include "tuning.h"
+#include "equalizer.h"
 
 #include <array>
 #include <cstdint>
@@ -36,6 +38,7 @@ struct Options {
     std::string soundtrack;    // --soundtrack DIR: the custom soundtrack's folder (soundtrack.h; default: beside settings.ini)
     std::string soundtrackDump; // --soundtrack-dump FILE: WAV file of what the custom soundtrack plays (headless)
     std::string settingsPath;  // settings.ini with the player's feature choices
+    std::string hotkeysPath;   // one global keyboard shortcut file shared by all games
     std::string features;      // --features A,B,-C
     std::string menuTest;      // --menu FRAME:KEYS[:shot.png]
     std::string keys;          // --keys TICK:KEY,TICK:KEY...
@@ -121,6 +124,7 @@ struct Port {
     cps2recomp::RomSet extraRoms; // (game.cfg's extra_set: another set the game reads, if it has one)
     std::unique_ptr<cps2recomp::Machine> machine;
     uint64_t frame = 0;       // frames run
+    uint64_t audioEpoch = 0;  // presentation discontinuities; never serialized or hashed
     uint16_t pad[cps2recomp::Machine::kMaxPlayers] = {}; // what the players hold (cps2recomp::Button bits), set by the window
     bool service = false, test = false;
     Movie playMovie, recMovie;
@@ -250,6 +254,9 @@ struct Port {
     void Again(const std::string &why);
     std::string rejoin;
     uint64_t againAt = 0; // (joining: the tick to try again at)
+    void ApplyTuning();
+    cps2recomp::Machine::SoundSide resetSoundSide = cps2recomp::Machine::SoundSide::Z80;
+    mutable PictureTuning pictureTuning;
     void RunAhead();
     void SoundTest();
     void MusicTest();

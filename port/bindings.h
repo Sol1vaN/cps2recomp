@@ -35,19 +35,22 @@ namespace port {
 struct BoundAction {
     const char *name;
     const char *title;
-    uint16_t bit;
+    uint32_t bit;
 };
 inline constexpr BoundAction kBoundActions[] = {
     {"up", "Up", 1 << 3},          {"down", "Down", 1 << 2},        {"left", "Left", 1 << 1},
     {"right", "Right", 1 << 0},    {"lp", "Light punch", 1 << 4},   {"mp", "Medium punch", 1 << 5},
     {"hp", "Hard punch", 1 << 6},  {"lk", "Light kick", 1 << 7},    {"mk", "Medium kick", 1 << 8},
     {"hk", "Hard kick", 1 << 9},   {"start", "Start", 1 << 10},     {"coin", "Coin", 1 << 11},
-    {"ppp", "All three punches", 7 << 4}, {"kkk", "All three kicks", 7 << 7},
+    {"ppp", "x3 punches", 1 << 12}, {"kkk", "x3 kicks", 1 << 13},
+    {"custom1", "Custom 1", 1 << 14}, {"custom2", "Custom 2", 1 << 15},
+    {"custom3", "Custom 3", 1 << 16}, {"custom4", "Custom 4", 1 << 17},
 };
 inline constexpr int kBoundActionCount = static_cast<int>(sizeof(kBoundActions) / sizeof(kBoundActions[0]));
 inline constexpr int kFirstButton = 4, kButtons = 6; // (the six buttons' place among them)
 inline constexpr int kFirstTogether = 12;            // (and the punches and kicks together, after them)
 inline constexpr int kBoundPlayersMost = recomp::kBindMaxPlayers;
+inline constexpr int kBoundPlayers = kBoundPlayersMost;
 
 using recomp::Bindings;
 using recomp::PadInput;
@@ -55,7 +58,7 @@ using recomp::PadInput;
 // A table of what can be bound, and each action's bit (its order is the table's, which need not have them all)
 struct BoundTable {
     recomp::BindAction actions[kBoundActionCount];
-    uint16_t bits[kBoundActionCount];
+    uint32_t bits[kBoundActionCount];
     recomp::BindTable table;
 };
 
@@ -77,6 +80,7 @@ inline const BoundTable &MakeBoundTable(int players, const std::string &buttons,
     static constexpr SDL_Scancode kKeys[kBoundActionCount] = {
         SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_A, SDL_SCANCODE_S,
         SDL_SCANCODE_D,  SDL_SCANCODE_Z,    SDL_SCANCODE_X,    SDL_SCANCODE_C,     SDL_SCANCODE_1, SDL_SCANCODE_5,
+        SDL_SCANCODE_I, SDL_SCANCODE_K, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
         SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
     };
     static constexpr PadInput kPad[kBoundActionCount] = {
@@ -84,7 +88,7 @@ inline const BoundTable &MakeBoundTable(int players, const std::string &buttons,
         {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, -1}, {SDL_GAMEPAD_BUTTON_WEST, -1},          {SDL_GAMEPAD_BUTTON_NORTH, -1},
         {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, -1}, {SDL_GAMEPAD_BUTTON_SOUTH, -1},     {SDL_GAMEPAD_BUTTON_EAST, -1},
         {-1, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER}, {SDL_GAMEPAD_BUTTON_START, -1},        {SDL_GAMEPAD_BUTTON_BACK, -1},
-        {}, {},
+        {}, {}, {}, {}, {}, {},
     };
     static constexpr PadInput kNamedPad[kButtons] = {
         {SDL_GAMEPAD_BUTTON_WEST, -1}, {SDL_GAMEPAD_BUTTON_SOUTH, -1}, {SDL_GAMEPAD_BUTTON_EAST, -1},
@@ -119,7 +123,7 @@ inline const BoundTable &MakeBoundTable(int players, const std::string &buttons,
         const int button = action - kFirstButton;
         const bool isButton = button >= 0 && button < kButtons;
         const bool named = isButton && button < static_cast<int>(names.size()) && !names[button].empty();
-        if (!shared && !names.empty() && ((isButton && !named) || action >= kFirstTogether)) {
+        if (!shared && !names.empty() && ((isButton && !named) || (action >= kFirstTogether && action < 14))) {
             continue; // (a button the game has not got, or its punches and kicks together)
         }
         const char *title = kBoundActions[action].title;
@@ -158,6 +162,11 @@ inline const char *GameButtons() {
     return "";
 }
 #endif
+
+inline const recomp::BindTable &BindingTable() { return MakeBoundTable(4, "", true).table; }
+inline Bindings DefaultBindings() { return recomp::DefaultBindings(BindingTable()); }
+inline Bindings LoadBindings(const std::string &path) { return recomp::LoadBindings(path, BindingTable()); }
+inline bool PadInputBound(const Bindings &b, PadInput input) { return recomp::PadInputBound(b, BindingTable(), input); }
 
 // The player's choices from settings.ini (the usual layout where it says nothing, or there is no file)
 inline Bindings LoadBindings(const std::string &settingsPath, const BoundTable &table) {

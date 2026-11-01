@@ -29,7 +29,10 @@ set(LAUNCHER_GAME_EXE "${GAME_EXE}")
 set(LAUNCHER_APP_ID "${APP_ID}")
 set(LAUNCHER_HOME_ENV "${HOME_ENV}")
 set(LAUNCHER_DISCLAIMER "${DISCLAIMER}")
-set(LAUNCHER_PORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/description.cpp
+set(LAUNCHER_PORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/input_controls.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/keyboard_controls.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/global_controls.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../port/keyboards.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../port/raw_keyboards.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../port/input_profile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../port/input_trace.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../port/hotkeys.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/description.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../machine/romset.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../machine/cps2crypt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../machine/kabuki.cpp)
 set(LAUNCHER_COLLECTION ${COLLECTION})
@@ -37,7 +40,7 @@ if(COLLECTION)
     # (the collection updates itself from the releases: each system's manifest and archive, tools/release/lib.sh;
     # not the Android app, which the system installs)
     if(NOT ANDROID)
-        set(LAUNCHER_UPDATE_REPO tmcleroy/cps2recomp)
+        set(LAUNCHER_UPDATE_REPO "") # custom builds require a reviewed source merge
     endif()
     # (VERSION's, or the release scripts' COLLECTION_VERSION, which their manifests say too)
     if(COLLECTION_VERSION)
@@ -67,3 +70,12 @@ target_compile_definitions(launcher PRIVATE
     LAUNCHER_BOARD="${BOARD}" LAUNCHER_CPS_B="${CPS_B}" LAUNCHER_OTHER_SET="${OTHER_SET}")
 find_package(ZLIB REQUIRED)
 target_link_libraries(launcher PRIVATE ZLIB::ZLIB)
+
+if(WIN32)
+ if(NOT MSVC)
+  enable_language(RC)
+  target_sources(launcher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../port/input_lab.rc)
+  target_include_directories(launcher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../port)
+ endif()
+ target_link_libraries(launcher PRIVATE cfgmgr32)
+endif()

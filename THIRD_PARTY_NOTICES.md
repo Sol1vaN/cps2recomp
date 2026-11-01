@@ -1,5 +1,14 @@
 # Third-party notices
 
+### MAMEPPK / MAME five-band equalizer (Input Lab 016)
+
+`port/equalizer.cpp` adapts the peak and shelf DSP from MAME's
+`src/emu/audio_effects/eq.cpp` and `eq.h`, by Olivier Galibert, as present in the
+user's MAMEPPK migration-0.289 source. The coefficient and history methods used
+as a test oracle are retained in `input-lab/tests/mame_equalizer_oracle.h`.
+These components use **BSD-3-Clause**; the complete copyright notice, conditions
+and disclaimer are in [licenses/mame-equalizer.txt](licenses/mame-equalizer.txt).
+
 cps2recomp is licensed under the GNU General Public License v3.0 (see `LICENSE`). Most of it was
 written for this project. What follows is everything that was not; the licenses of all of it are
 compatible with the GPL-3.0.

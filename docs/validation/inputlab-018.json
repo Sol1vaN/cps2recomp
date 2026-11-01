@@ -1,0 +1,16 @@
+{
+  "version": "1.2.0-inputlab.018",
+  "native_games": 18,
+  "regression_suites_passed": 6,
+  "colour_cases": 396,
+  "colour_checks": 32475,
+  "boss_damage_speed_regression_checks": 12457,
+  "mame_original_palette_VRAM_cases": 60,
+  "pure_frames_identical_to_017": 2100,
+  "native_shin_grey_vs_akuma_black": true,
+  "menu_saved_and_reloaded": true,
+  "per_game_and_per_player_settings": true,
+  "previous_build_preserved": true,
+  "environment": "Windows x64; local validation, not public GitHub Actions",
+  "source_archive_sha256": "181fdcc289d12701f3e53630ac5e09ca0625a2095cf8c9a8fc3e8ddeda2fba73"
+}

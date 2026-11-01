@@ -88,7 +88,12 @@ target_sources(launcher PRIVATE
     ${LAUNCHER_PORT_SOURCES} "${LAUNCHER_FONTS}")
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "${LAUNCHER_GAME_EXE}-launcher")
 target_include_directories(launcher PRIVATE ${RECOMP_LAUNCHER_DIR}/src ${RECOMP_COMMON_SRC})
-target_compile_options(launcher PRIVATE -Wall -Wextra)
+if(MSVC)
+    target_compile_definitions(launcher PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(launcher PRIVATE /W3 /utf-8)
+else()
+    target_compile_options(launcher PRIVATE -Wall -Wextra)
+endif()
 target_compile_definitions(launcher PRIVATE
     LAUNCHER_GAME_NAME="${LAUNCHER_GAME_NAME}" LAUNCHER_GAME_EXE="${LAUNCHER_GAME_EXE}" LAUNCHER_APP_ID="${LAUNCHER_APP_ID}"
     LAUNCHER_HOME_ENV="${LAUNCHER_HOME_ENV}" LAUNCHER_DISCLAIMER="${LAUNCHER_DISCLAIMER}")

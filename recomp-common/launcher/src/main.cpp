@@ -37,6 +37,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "imgui_internal.h"
 #include "ui.h"
+#include "../../../port/window_layout.h"
 
 namespace {
 
@@ -134,7 +135,7 @@ struct Presser {
             SDL_Keycode keycode;
         } kKeys[] = {{'u', SDL_SCANCODE_UP, SDLK_UP},         {'d', SDL_SCANCODE_DOWN, SDLK_DOWN},   {'l', SDL_SCANCODE_LEFT, SDLK_LEFT},
                      {'r', SDL_SCANCODE_RIGHT, SDLK_RIGHT},   {'e', SDL_SCANCODE_RETURN, SDLK_RETURN}, {'s', SDL_SCANCODE_SPACE, SDLK_SPACE},
-                     {'x', SDL_SCANCODE_ESCAPE, SDLK_ESCAPE}, {'f', SDL_SCANCODE_F, SDLK_F}};
+                     {'x', SDL_SCANCODE_ESCAPE, SDLK_ESCAPE}, {'f', SDL_SCANCODE_F, SDLK_F}, {'w', SDL_SCANCODE_W, SDLK_W}};
         static const struct {
             char key;
             SDL_GamepadButton button;
@@ -257,6 +258,11 @@ int main(int argc, char** argv) {
     std::string play_id, page_id;
     std::vector<std::string> extra;  // (after --: the game's)
     int width = 980, height = 660;
+    bool explicit_size = false;
+    float capture_scroll = -1.0f;
+    int click_x = -1, click_y = -1;
+    bool clicked = false;
+    int controls_player = 0;
     for (int i = 1; i < argc; i++) {
         if (std::strcmp(argv[i], "--") == 0) {
             extra.assign(argv + i + 1, argv + argc);
@@ -264,9 +270,16 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
             screenshot_prefix = argv[++i];
         } else if (std::strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+            explicit_size = true;
             if (std::sscanf(argv[++i], "%dx%d", &width, &height) != 2 || width < 320 || height < 240) {
                 width = 980, height = 660;
             }
+        } else if (std::strcmp(argv[i], "--scroll") == 0 && i + 1 < argc) {
+            capture_scroll = static_cast<float>(std::atof(argv[++i]));
+        } else if (std::strcmp(argv[i], "--click") == 0 && i + 1 < argc) {
+            std::sscanf(argv[++i], "%d,%d", &click_x, &click_y);
+        } else if (std::strcmp(argv[i], "--controls-player") == 0 && i + 1 < argc) {
+            controls_player = std::atoi(argv[++i]) == 2 ? 1 : 0;
         } else if (std::strcmp(argv[i], "--press") == 0 && i + 1 < argc) {
             press = argv[++i];
             pressing = true;
@@ -290,6 +303,7 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return code;
     }
+    SDL_SetHintWithPriority(SDL_HINT_WINDOWS_RAW_KEYBOARD, "0", SDL_HINT_OVERRIDE);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, LAUNCHER_GAME_NAME, SDL_GetError(), nullptr);
         return 1;
@@ -301,8 +315,13 @@ int main(int argc, char** argv) {
     // (no bigger than the screen: a small one, or one with large text, has less room than the launcher would take)
     int window_width = static_cast<int>(width * scale), window_height = static_cast<int>(height * scale);
     int least_width = static_cast<int>(600 * scale), least_height = static_cast<int>(400 * scale);
-    SDL_Rect usable;
+    SDL_Rect usable{}, initial{};
+    bool fitted = false;
     if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable)) {
+        if (!explicit_size && screenshot_prefix.empty()) {
+            initial = port::InitialLauncherBounds(usable, scale);
+            window_width = initial.w; window_height = initial.h; fitted = true;
+        }
         window_width = std::min(window_width, usable.w);
         window_height = std::min(window_height, usable.h);
         least_width = std::min(least_width, usable.w);
@@ -317,7 +336,11 @@ int main(int argc, char** argv) {
     }
     SDL_SetWindowMinimumSize(window, least_width, least_height);
     SDL_SetRenderVSync(renderer, 1);
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    if (fitted) {
+        int top = 0, left = 0, bottom = 0, right = 0;
+        SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right);
+        SDL_SetWindowPosition(window, initial.x, initial.y - top / 2);
+    } else SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -339,6 +362,8 @@ int main(int argc, char** argv) {
     ui::set_dark(system_dark());
     ui::apply_style(SDL_GetWindowDisplayScale(window));
     App app(window);
+    app.set_controls_player(controls_player);
+    if (!screenshot_prefix.empty()) app.set_capture_scroll(capture_scroll);
     if (!page_id.empty()) {
         app.set_page(page_id);
     }
@@ -395,6 +420,15 @@ int main(int argc, char** argv) {
         previous = now;
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        // Exercise actual widgets in the hidden renderer; never synthesize desktop input.
+        if (!screenshot_prefix.empty() && click_x >= 0 && shot_frames == 30 && !clicked) {
+            io.AddMousePosEvent(click_x * scale, click_y * scale);
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        }
+        if (!screenshot_prefix.empty() && click_x >= 0 && shot_frames == 32 && !clicked) {
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+            clicked = true;
+        }
         ImGui::NewFrame();
         touch.frame();
         if (!screenshot_prefix.empty() && shot_frames == 0 && !pressing && page_id.empty()) {

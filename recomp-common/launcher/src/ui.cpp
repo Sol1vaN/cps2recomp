@@ -280,14 +280,14 @@ void gap(float value) {
     ImGui::Dummy(ImVec2(0, px(value)));
 }
 
-bool button(const char* label, Kind kind, float width, bool enabled, float height) {
+bool button(const char* label, Kind kind, float width, bool enabled, float height, float horizontal_padding) {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     ImGuiID id = window->GetID(label);
     const char* end = ImGui::FindRenderedTextEnd(label);
     float font_size = height >= 44.0f ? 16.0f : size::kBody;
     push_font(Font::Semibold, font_size);
     ImVec2 label_size = ImGui::CalcTextSize(label, end);
-    ImVec2 box(std::max(px(width), label_size.x + px(40)), px(height));
+    ImVec2 box(std::max(px(width), label_size.x + px(horizontal_padding)), px(height));
     ImRect rect(window->DC.CursorPos, window->DC.CursorPos + box);
     bool hovered = false;
     bool held = false;

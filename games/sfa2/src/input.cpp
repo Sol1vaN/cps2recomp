@@ -5,6 +5,7 @@
 // lift.h): the video registers set for the frame, then the control panel read. Everything the game knows of the
 // sticks and buttons comes from here, once a frame.
 #include "sfa2.h"
+#include "../../../port/input_trace.h"
 
 namespace cps2recomp {
 
@@ -77,6 +78,9 @@ namespace {
             SetRam8(Var(c, kControls[player]) + 1, stick);
             SetRam8(Var(c, kControls[player]), buttons);
         }
+        if (port::InputTraceEnabled()) port::InputTraceNote("SFA2_PANEL",
+            "p1="+std::to_string(Ram16(Var(c,kControls[0])))+";p2="+std::to_string(Ram16(Var(c,kControls[1])))+
+            ";previous1="+std::to_string(Ram16(Var(c,kControlsBefore[0])))+";previous2="+std::to_string(Ram16(Var(c,kControlsBefore[1]))));
         // (the kicks' port as it was read, this frame and the last)
         SetRam8(Var(c, AtA5(0x5F69)), Ram8(Var(c, AtA5(0x5F68))));
         SetRam8(Var(c, AtA5(0x5F68)), Mem8(c, 0x804010));

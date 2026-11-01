@@ -9,3 +9,16 @@ rom/
 *.state
 state*.bin
 frame_data.csv
+
+# Input Lab: local builds, diagnostics and personal data
+/out/
+/package_*/
+/migration/
+/roms/
+/user/
+/backups/
+/screenshots/
+*.eeprom
+*.wav
+*.hash
+*.log

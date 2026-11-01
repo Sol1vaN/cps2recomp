@@ -171,6 +171,14 @@ struct Description {
 
     // Controllers page. With actions, each player's keys and buttons can be chosen (bindings.h).
     recomp::BindTable bindings;
+    bool per_game_controls = false;
+    std::function<void(PageContext &)> hardware_controls;
+    std::function<void(PageContext &, int player)> controller_settings;
+    std::function<void(PageContext &)> global_controls;
+    std::function<bool(const SDL_Event &)> controls_event;
+    std::function<bool()> controls_capturing;
+    // Optional physical-device capture, polled after controller_settings draws.
+    std::function<SDL_Scancode(int player)> keyboard_binding;
     const char *controls_heading = "WHILE PLAYING";
     std::vector<InfoRow> controls;            // what is fixed, as rows of text
 };

@@ -1,3 +1,5 @@
+#include "input_controls.h"
+#include "global_controls.h"
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Tommy McLeroy. Part of cps2recomp.
 //
@@ -8,6 +10,8 @@
 // that tools/gamecfg.py --collection writes from them all.
 
 #include "launcher.h"
+#include "input_controls.h"
+#include "global_controls.h"
 
 #include "../../machine/romset.h"
 #include "../../port/bindings.h"
@@ -207,6 +211,16 @@ launcher::Description describe_game(const GameInfo& game) {
         std::vector<std::string> args = {"--rom", launch.file, "--eeprom", (launch.folder / "saves" / "eeprom.bin").string(),
                                          "--settings", (launch.folder / "settings.ini").string()};
 #ifdef LAUNCHER_COLLECTION
+        args.insert(args.end(), {"--hotkeys", (launch.folder.parent_path() / "hotkeys.ini").string()});
+#else
+        args.insert(args.end(), {"--hotkeys", (launch.folder / "hotkeys.ini").string()});
+#endif
+#ifdef LAUNCHER_COLLECTION
+        args.insert(args.end(), {"--hotkeys", (launch.folder.parent_path() / "hotkeys.ini").string()});
+#else
+        args.insert(args.end(), {"--hotkeys", (launch.folder / "hotkeys.ini").string()});
+#endif
+#ifdef LAUNCHER_COLLECTION
         if (const GameInfo* other = extra.empty() || !launch.file_of ? nullptr : game_of_set(extra.c_str())) {
             const std::string file = launch.file_of(other->id);
             if (!file.empty()) {
@@ -248,13 +262,19 @@ launcher::Description describe_game(const GameInfo& game) {
     d.online.arcade_argument = "--net-arcade"; // (the host plays alone until the other player comes: port/main.cpp, ArcadeFrame)
     d.online.invite_argument = "--net-invite"; // (a player in the waiting room invited: online/, Collection::room)
     d.online.invite_name_argument = "--net-invite-name";
-    d.display = {{"fullscreen", "Full screen", "F11 switches while playing.", false, nullptr}};  // (a window unless asked)
+    d.display = {{"fullscreen", "Full screen", "Use the fullscreen shortcut configured in Controllers.", false, nullptr}};
     for (const FeatureSwitch& one : switches) {
         d.display.push_back({keep(one.name), keep(one.title), keep(one.detail), false, nullptr});
     }
     // (its own table: a collection's game has the one every game shares, Collection::bindings, unless it is given a
     // layout of its own on the Controllers page)
     d.bindings = port::MakeBoundTable(*game.players ? atoi(game.players) : 2, game.buttons, false).table;
+    d.hardware_controls = DrawHardwareControls;
+    d.controller_settings = DrawInputControls;
+    d.global_controls = DrawGlobalControls;
+    d.controls_event = [](const SDL_Event &event) { return ConsumeKeyboardControlsEvent(event) || ConsumeGlobalControlsEvent(event); };
+    d.controls_capturing = [] { return CapturingKeyboardControls() || CapturingGlobalControls(); };
+    d.keyboard_binding = PollKeyboardBinding;
     d.controls_heading = "WHILE PLAYING";
     d.controls = {{"Keys", keep(std::string("Esc, F1, the left stick's click, or Start and Select together: the in-game menu (") + (forAll ? "training mode and the other modes" : "the game's options") + ", save states, coin, cheats, quit)   P / O: stop, one frame on   - / =: speed   " + (forAll ? "Backspace: start over (training)   " : "") + "F5 / F9: save and load a state   F6 / F7: slot   F2: operator's test switch   F11: full screen. On a gamepad: right stick's click stops the game and starts it again, left trigger goes on a frame while it is stopped, left shoulder starts over. (A key or button given to the game above does only that.)")}};
     return d;
@@ -322,7 +342,7 @@ const launcher::Collection& launcher::describe_collection() {
 #else
         c.intro = "Each game needs your own copy of it: its arcade ROM set (a CPS-2 game's with its key file). Show the launcher the folder you keep them in, "
                   "or drop a set (or the folder) on this window. The sets stay where they are: the launcher only reads them.\n\n"
-                  "While playing, Esc or F1 on the keyboard, or the left stick's click (or Start and Select together) on a gamepad, "
+                  "While playing, Esc or your configured menu shortcut on the keyboard, or the left stick's click (or Start and Select together) on a gamepad, "
                   "opens the in-game menu.";
         c.find_title = "Look in a folder";
         c.find_detail = "Finds each game's ROM set in a folder of them, by the set's name (sfa2u.zip, say).";

@@ -11,6 +11,7 @@
 // order (--sound check). A game whose sound ROM holds another version of the driver keeps the Z80.
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -154,7 +155,7 @@ private:
     }
     // Its multiplication goes through the first number bit by bit, and adds for each bit that is set
     uint32_t Product(uint16_t a, uint16_t b) {
-        Spend(660 + 17 * static_cast<uint32_t>(__builtin_popcount(a)));
+        Spend(660 + 17 * static_cast<uint32_t>(std::popcount(a)));
         return static_cast<uint32_t>(a) * b;
     }
     // The high word of a product: a level times a fraction of 65536

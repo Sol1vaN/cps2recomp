@@ -5,6 +5,13 @@
 #include "game_info.h"
 
 #include "bindings.h"
+#include "gamepad_assignment.h"
+#include "input_profile.h"
+#include "hotkeys.h"
+#include "pad_hotkeys.h"
+#include <map>
+#include "raw_keyboards.h"
+#include "input_trace.h"
 #include "port.h"
 #include "png_write.h"
 #include "present.h"
@@ -39,6 +46,14 @@ namespace {
         return table;
     }
     Bindings g_bindings = recomp::DefaultBindings(Table().table);
+    Hotkeys g_hotkeys = DefaultHotkeys();
+    PadHotkeys g_padHotkeys = DefaultPadHotkeys();
+    PadShortcutContext g_padContext;
+    GamepadAssignments g_gamepadAssignments;
+    std::vector<SDL_Gamepad *> g_gamepads;
+    int PadPlayer(SDL_Gamepad *gp) {
+        return gp ? AssignedGamepadPlayer(SDL_GetGamepadID(gp), ResolveGamepadAssignments(g_gamepadAssignments, DescribeGamepads(g_gamepads))) : -1;
+    }
     int Players() {
         return Table().table.players;
     }
@@ -46,7 +61,7 @@ namespace {
     static_assert(kBoundActions[0].bit == kUp && kBoundActions[1].bit == kDown && kBoundActions[2].bit == kLeft &&
                   kBoundActions[3].bit == kRight && kBoundActions[4].bit == kPunch1 && kBoundActions[9].bit == kKick3 &&
                   kBoundActions[10].bit == kStart && kBoundActions[11].bit == kCoin &&
-                  kBoundActions[12].bit == (kPunch1 | kPunch2 | kPunch3) && kBoundActions[13].bit == (kKick1 | kKick2 | kKick3));
+                  kBoundActions[12].bit == (1u << 12) && kBoundActions[17].bit == (1u << 17));
 
     constexpr int kDead = 16000; // how far a stick or a trigger must go to count
 
@@ -60,8 +75,18 @@ namespace {
         }
         return false;
     }
-    bool ButtonBound(SDL_GamepadButton button) {
-        return PadInputBound(g_bindings, Table(), {button, -1});
+    bool ButtonBound(SDL_GamepadButton button, int player) {
+        return PlayerPadInputBound(g_bindings, player, {button, -1}, Table());
+    }
+
+    bool ShortcutGameBound(int n, int player) {
+        const auto &chord = g_padHotkeys[n];
+        return chord.size() == 1 && PlayerPadInputBound(g_bindings, player, chord.front(), Table());
+    }
+    bool ShortcutHeld(SDL_Gamepad *gp, int player, int n) {
+        if (!PadShortcutEligible(n, g_padContext) || ShortcutGameBound(n, player)) return false;
+        const auto &chord = g_padHotkeys[n];
+        return !chord.empty() && std::all_of(chord.begin(), chord.end(), [&](auto input) { return recomp::PadInputPressed(gp, input); });
     }
 
     // The camera's zoom (zoom.h) is the left stick's click held and a shoulder pressed: left for player 1, right for
@@ -69,7 +94,7 @@ namespace {
     // click is held (and is not the game's), the shoulders and the directions are not the game's. On the keyboard,
     // Left Shift held, Q, E and W, and the arrows.
     bool ZoomHeld(SDL_Gamepad *gp) {
-        return Zoom::Possible() && gp && !ButtonBound(SDL_GAMEPAD_BUTTON_LEFT_STICK) && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+        return gp && PadPlayer(gp) >= 0 && ShortcutHeld(gp, PadPlayer(gp), kPadZoomHold);
     }
     bool Shoulder(int button) {
         return button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
@@ -86,45 +111,28 @@ namespace {
                key == SDL_SCANCODE_LEFT || key == SDL_SCANCODE_RIGHT;
     }
 
-    uint16_t ReadKeyboard(const bool *keys, int player) {
-        uint16_t pad = 0;
-        const bool zoomHeld = KeyZoomHeld(keys);
-        for (int action = 0; action < Table().table.count; action++) {
-            const SDL_Scancode key = g_bindings.key[player][action];
-            if (zoomHeld && KeyZoom(key)) {
-                continue;
-            }
-            if (key != SDL_SCANCODE_UNKNOWN && keys[key]) {
-                pad |= Table().bits[action];
-            }
+    uint32_t ReadKeyboard(const bool *keys, int player, bool globalShortcuts = true) {
+        uint32_t mask = ReadKeyboardButtons(g_bindings, keys, player, g_hotkeys,
+                                            SDL_GetModState(), globalShortcuts, Table());
+        if (KeyZoomHeld(keys)) {
+            for (int a = 0; a < Table().table.count; ++a)
+                if (KeyZoom(g_bindings.key[player][a])) mask &= ~Table().bits[a];
         }
-        // (Return starts player 1's game too, unless it has been given something to do)
-        if (player == 0 && keys[SDL_SCANCODE_RETURN] && !KeyBound(SDL_SCANCODE_RETURN)) {
-            pad |= kStart;
-        }
-        return pad;
+        return mask;
     }
-
-    uint16_t ReadGamepad(SDL_Gamepad *gp, int player) {
-        uint16_t pad = 0;
-        const bool zoomHeld = ZoomHeld(gp);
-        for (int action = 0; action < Table().table.count; action++) {
-            const PadInput input = g_bindings.pad[player][action];
-            if (zoomHeld && (Shoulder(input.button) || DPad(input.button))) {
-                continue;
-            }
-            if ((input.button >= 0 && SDL_GetGamepadButton(gp, static_cast<SDL_GamepadButton>(input.button))) ||
-                (input.axis >= 0 && SDL_GetGamepadAxis(gp, static_cast<SDL_GamepadAxis>(input.axis)) > kDead)) {
-                pad |= Table().bits[action];
-            }
+    uint32_t ReadGamepad(SDL_Gamepad *gp, int player) {
+        uint32_t mask = ReadGamepadInput(gp, g_bindings, player, Table());
+        for (int n = 0; n < kPadHotkeyCount; ++n) {
+            if (!ShortcutHeld(gp, player, n)) continue;
+            for (int a = 0; a < Table().table.count; ++a)
+                if (std::find(g_padHotkeys[n].begin(), g_padHotkeys[n].end(), g_bindings.pad[player][a]) != g_padHotkeys[n].end()) mask &= ~Table().bits[a];
         }
-        const int x = zoomHeld ? 0 : SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX);
-        const int y = zoomHeld ? 0 : SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
-        if (x < -kDead) pad |= kLeft;
-        if (x > kDead) pad |= kRight;
-        if (y < -kDead) pad |= kUp;
-        if (y > kDead) pad |= kDown;
-        return pad;
+        if (ZoomHeld(gp)) {
+            mask &= ~uint32_t(15);
+            for (int a = 0; a < Table().table.count; ++a)
+                if (Shoulder(g_bindings.pad[player][a].button)) mask &= ~Table().bits[a];
+        }
+        return mask;
     }
 
     // A Multi game run's window: where the game before left it (each game is a program of its own, and its window
@@ -174,6 +182,21 @@ int RunWindowed(Port &port) {
     if (!port.opt.settingsPath.empty()) {
         g_bindings = LoadBindings(port.opt.settingsPath, Table());
     }
+    LoadCurrentInputProfile(port.opt.settingsPath);
+    InputProcessor inputProcessor;
+    g_hotkeys = LoadHotkeys(port.opt.hotkeysPath.empty() ? DefaultHotkeysPath() : port.opt.hotkeysPath);
+    g_padHotkeys = LoadPadHotkeys(port.opt.hotkeysPath.empty() ? DefaultHotkeysPath() : port.opt.hotkeysPath);
+    const auto keyboardPath = (std::filesystem::path(port.opt.hotkeysPath.empty() ? DefaultHotkeysPath() : port.opt.hotkeysPath).parent_path() / "keyboards.ini").string();
+    auto keyboardConfig = LoadKeyboards(keyboardPath);
+    g_gamepadAssignments = LoadGamepadAssignments((std::filesystem::path(keyboardPath).parent_path() / "gamepads.ini").string());
+    InputTraceConfigure(keyboardConfig);
+    RawKeyboards keyboards;
+    if (keyboardConfig.enabled) SDL_SetHintWithPriority(SDL_HINT_WINDOWS_RAW_KEYBOARD, "0", SDL_HINT_OVERRIDE);
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");
+    if (!port.opt.settingsPath.empty()) {
+        g_bindings = LoadBindings(port.opt.settingsPath);
+    }
+    InputTraceProfile(KeyboardActionOptions(keyboardConfig, CurrentInputProfile()), g_bindings);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
@@ -318,6 +341,11 @@ int RunWindowed(Port &port) {
             port.quit = true;
             return;
         }
+        if (keyboardConfig.enabled && !keyboards.Retarget(window)) {
+            fprintf(stderr, "%s\n", keyboards.Error().c_str());
+            port.quit = true;
+            return;
+        }
         sayPresenter();
     };
 
@@ -329,11 +357,21 @@ int RunWindowed(Port &port) {
     double audioLeast = 1;
     int audioDropped = 0;
     // (--mute starts with no sound; the menu's Sound row switches it on, so the device is opened all the same)
+    if (keyboardConfig.enabled && !keyboards.Open(window)) {
+        fprintf(stderr, "%s\n", keyboards.Error().c_str());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Separate keyboards", keyboards.Error().c_str(), window);
+        presenter.Close(); SDL_DestroyWindow(window); SDL_Quit(); return 1;
+    }
+    keyboardConfig=keyboards.State().ResolveConfig(keyboardConfig);
+    InputTraceConfigure(keyboardConfig);
+    Equalizer boardEqualizer, musicEqualizer;
+    std::vector<float> boardMade;
+    uint64_t audioEpoch = port.audioEpoch;
     SDL_AudioStream *audio = nullptr;
     port.menu.muted = port.opt.mute;
     bool silent = false;
     {
-        const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, QSound::kSampleRate};
+        const SDL_AudioSpec spec{SDL_AUDIO_F32, 2, QSound::kSampleRate};
         audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
         if (audio) {
             SDL_ResumeAudioStreamDevice(audio);
@@ -353,20 +391,24 @@ int RunWindowed(Port &port) {
     std::vector<float> musicMade;
     bool musicSilent = false;
 
-    std::vector<SDL_Gamepad *> gamepads;
+    auto &gamepads = g_gamepads;
+    gamepads.clear();
     // The in-game menu: opened and closed by Esc, F1, a gamepad stick's click or its Start and Select
     // together (the game is left from its "Quit game"). While it is open the game stands still and the
     // controls work the menu; buttons held as it closes do not reach the game until let go.
     std::vector<uint32_t> menuBase, menuPicture, shown;
     uint32_t menuWidth = 0, menuHeight = 0;
     bool menuDirty = false;
-    uint16_t previousPad = 0, heldAtClose = 0;
+    uint32_t previousPad = 0;
+    std::array<uint32_t, Machine::kMaxPlayers> heldAtClose{};
+    bool releaseAtClose = false;
     unsigned previousMenu = 0;
     int triggerHeld = 0;
-    bool bothHeld = false; // a gamepad's Start and Select (Back) together: the menu
+
     // (with a zoom to work, the left stick's click opens the menu when it is let go, unless a shoulder was pressed
     // while it was held: then it was the zoom's)
-    bool stickWaiting = false;
+    using ShortcutRuntime = PadShortcutRouter;
+    std::map<SDL_JoystickID, ShortcutRuntime> padShortcuts;
     auto toggleMenu = [&]() {
         if (port.net) {
             // (online: no menu, the game goes on for both players; Esc gives up a wait, and in a match asks whether to
@@ -428,9 +470,79 @@ int RunWindowed(Port &port) {
     // (the menu's Zoom row, as last seen: a change there is the camera's, and a zoom's press is the row's)
     int zoomRow = port.zoom.Choice();
     const double kFrameNs = 1e9 / Machine::kFramesPerSecond;
+    auto handleHotkey = [&](HotkeyAction action) {
+                if(InputTraceEnabled() && action!=HotkeyAction::None)
+                    InputTraceNote("HOTKEY",std::to_string(static_cast<int>(action)));
+                if (port.net && action != HotkeyAction::Chat && action != HotkeyAction::Menu && action != HotkeyAction::Fullscreen &&
+                    action != HotkeyAction::FullscreenAlt) return;
+                switch (action) {
+                case HotkeyAction::Menu:
+                    toggleMenu(); releaseAtClose = true; break;
+                case HotkeyAction::Reset: port.Key('r'); menuDirty = true; break;
+                case HotkeyAction::Save:
+                case HotkeyAction::Load:
+                    if (!port.menu.IsOpen()) quickState(action == HotkeyAction::Save);
+                    break;
+                case HotkeyAction::PreviousSlot: port.menu.SetSlot(port.menu.Slot() - 1); break;
+                case HotkeyAction::NextSlot: port.menu.SetSlot(port.menu.Slot() + 1); break;
+                case HotkeyAction::Pause: if (!port.menu.IsOpen()) port.Key('p'); break;
+                case HotkeyAction::Step: if (!port.menu.IsOpen()) port.Key('o'); break;
+                case HotkeyAction::Slower: port.Key('-'); break;
+                case HotkeyAction::Faster: port.Key('='); break;
+                case HotkeyAction::Restart: if (!port.menu.IsOpen()) port.Key('k', kKeyRestart); break;
+                case HotkeyAction::Extra: if (!port.menu.IsOpen()) port.Key('k', kKeyExtra); break;
+                case HotkeyAction::Test: port.test = !port.test; break;
+                case HotkeyAction::Chat: chatOpen(!port.typing); break;
+                case HotkeyAction::ZoomPlayer1: if (!port.menu.IsOpen()) port.zoom.Press(0); break;
+                case HotkeyAction::ZoomPlayer2: if (!port.menu.IsOpen()) port.zoom.Press(1); break;
+                case HotkeyAction::ZoomBoth: if (!port.menu.IsOpen()) port.zoom.Both(); break;
+                case HotkeyAction::Fullscreen:
+                case HotkeyAction::FullscreenAlt:
+                    SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+                    break;
+                default: break;
+                }
+    };
+    auto padContext = [&] {
+        return PadShortcutContext{port.net != nullptr, port.paused, port.menu.IsOpen(), multi,
+                                  Zoom::Possible() && !port.net};
+    };
+    auto processPadShortcuts = [&](SDL_Gamepad *gp, ShortcutRuntime &runtime) {
+        const int player = PadPlayer(gp);
+        if (player < 0 || player >= Players()) { runtime = {}; return; }
+        g_padContext = padContext();
+        PadHotkeyBits held;
+        for (int n = 0; n < kPadHotkeyCount; ++n)
+            held[n] = PadShortcutEligible(n, g_padContext) && !ShortcutGameBound(n, player) && runtime.state.Down(g_padHotkeys[n]);
+        const auto pressed = runtime.Update(g_padHotkeys, held, g_padContext.menu);
+        for (int n = 0; n < kPadHotkeyCount; ++n) {
+            if (!pressed[n]) continue;
+            const bool menu = n == static_cast<int>(HotkeyAction::Menu) || n == kPadMenuAlt || n == kPadMenuChord;
+            if (menu) {
+                handleHotkey(HotkeyAction::Menu);
+            } else if (n < kHotkeyCount) handleHotkey(static_cast<HotkeyAction>(n));
+            else if (n == kPadMultiNext) port.Key('n');
+        }
+    };
+    uint64_t menuRepeatAt = 0;
+    unsigned menuRepeatDirection = 0;
+    auto keyPress = [&](SDL_Scancode key, SDL_Keymod mods, bool repeat, const bool *keys) {
+        const auto action = FindHotkey(g_hotkeys, key, mods, repeat);
+        if (action != HotkeyAction::None) { handleHotkey(action); return; }
+        if (key == SDL_SCANCODE_AC_BACK) { toggleMenu(); return; }
+        if (KeyBound(key)) return;
+        if (!port.menu.IsOpen() && !repeat && KeyZoomHeld(keys) &&
+            (key == SDL_SCANCODE_Q || key == SDL_SCANCODE_E || key == SDL_SCANCODE_W)) {
+            if (key == SDL_SCANCODE_W) port.zoom.Both();
+            else port.zoom.Press(key == SDL_SCANCODE_E ? 1 : 0);
+        } else if (port.net && key == SDL_SCANCODE_T && !repeat) {
+            chatOpen(true); openedByT = port.typing ? SDL_GetTicks() : 0;
+        } else if (multi && !port.menu.IsOpen() && key == SDL_SCANCODE_N && !repeat) port.Key('n');
+    };
     uint64_t nextFrame = SDL_GetTicksNS();
     bool running = true;
     while (running && !port.quit && (port.opt.frames == 0 || port.frame < port.opt.frames)) {
+        InputTraceFrame(port.frame);
         SDL_Event ev;
         if (port.typing && (!port.net || port.connecting)) {
             chatOpen(false); // (the match over, or waited for again)
@@ -466,89 +578,29 @@ int RunWindowed(Port &port) {
             switch (ev.type) {
             case SDL_EVENT_QUIT: running = false; break;
             case SDL_EVENT_KEY_DOWN:
-                if (!port.menu.IsOpen() && !ev.key.repeat &&
-                    (ev.key.scancode == SDL_SCANCODE_Q || ev.key.scancode == SDL_SCANCODE_E || ev.key.scancode == SDL_SCANCODE_W) &&
-                    KeyZoomHeld(SDL_GetKeyboardState(nullptr))) {
-                    if (ev.key.scancode == SDL_SCANCODE_W) {
-                        port.zoom.Both();
-                    } else {
-                        port.zoom.Press(ev.key.scancode == SDL_SCANCODE_E ? 1 : 0);
-                    }
-                } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || ev.key.scancode == SDL_SCANCODE_AC_BACK ||
-                           (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
-                    // (AC_BACK: a phone's Back)
-                    toggleMenu();
-                } else if (KeyBound(ev.key.scancode)) {
-                    // (a key the player has given to the game does only that)
-                } else if (port.net && ev.key.scancode == SDL_SCANCODE_T && !ev.key.repeat) {
-                    chatOpen(true);
-                    openedByT = port.typing ? SDL_GetTicks() : 0;
-                } else if (multi && !port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_N && !ev.key.repeat) {
-                    port.Key('n');
-                } else if (ev.key.scancode == SDL_SCANCODE_F5 || ev.key.scancode == SDL_SCANCODE_F9) {
-                    // F5 keeps the game in the slot, F9 goes back to it; F6 / F7: the slot before, the next
-                    if (!port.menu.IsOpen()) {
-                        quickState(ev.key.scancode == SDL_SCANCODE_F5);
-                    }
-                } else if (ev.key.scancode == SDL_SCANCODE_F6 || ev.key.scancode == SDL_SCANCODE_F7) {
-                    port.menu.SetSlot(port.menu.Slot() + (ev.key.scancode == SDL_SCANCODE_F7 ? 1 : -1));
-                } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_P && !ev.key.repeat) {
-                    port.Key('p'); // stops the game, and starts it again
-                } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_O) {
-                    port.Key('o'); // on by one frame (held: frame after frame)
-                } else if (ev.key.scancode == SDL_SCANCODE_MINUS || ev.key.scancode == SDL_SCANCODE_EQUALS) {
-                    port.Key(ev.key.scancode == SDL_SCANCODE_MINUS ? '-' : '='); // slower, faster
-                } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSPACE && !ev.key.repeat) {
-                    port.Key('k', kKeyRestart);
-                } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSLASH && !ev.key.repeat) {
-                    port.Key('k', kKeyExtra);
-                } else if (ev.key.scancode == SDL_SCANCODE_F2) {
-                    port.test = !port.test; // the operator's test switch
-                } else if (ev.key.scancode == SDL_SCANCODE_F11 ||
-                           (ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT))) {
-                    SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
-                }
+                InputTraceSDL(ev.key.scancode, true, ev.key.repeat, ev.key.mod, ev.key.which);
+                if (!keyboardConfig.enabled) keyPress(ev.key.scancode, ev.key.mod, ev.key.repeat, SDL_GetKeyboardState(nullptr));
+                break;
+            case SDL_EVENT_KEY_UP:
+                InputTraceSDL(ev.key.scancode, false, ev.key.repeat, ev.key.mod, ev.key.which);
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-                if (!port.menu.IsOpen() && Shoulder(ev.gbutton.button) && ZoomHeld(SDL_GetGamepadFromID(ev.gbutton.which))) {
-                    port.zoom.Press(ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER ? 1 : 0);
-                    stickWaiting = false;
-                } else if (!port.menu.IsOpen() && ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK &&
-                           !ButtonBound(SDL_GAMEPAD_BUTTON_RIGHT_STICK) && ZoomHeld(SDL_GetGamepadFromID(ev.gbutton.which))) {
-                    port.zoom.Both(); // (not the right stick's own pause)
-                    stickWaiting = false;
-                } else if (ButtonBound(static_cast<SDL_GamepadButton>(ev.gbutton.button))) {
-                    // (a button the player has given to the game does only that)
-                } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK && Zoom::Possible() && !port.menu.IsOpen()) {
-                    stickWaiting = true;
-                } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK || ev.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
-                    toggleMenu();
-                } else if (port.menu.IsOpen()) {
-                    break;
-                } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
-                    if (port.net) {
-                        chatOpen(!port.typing);
-                    } else {
-                        port.Key('p');
-                    }
-                } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
-                    port.Key(multi ? 'n' : 'k', kKeyRestart);
-                }
-                break;
             case SDL_EVENT_GAMEPAD_BUTTON_UP:
-                if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK && stickWaiting) {
-                    stickWaiting = false;
-                    if (!port.menu.IsOpen()) {
-                        toggleMenu();
-                    }
-                }
+            case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+                const auto id = ev.type == SDL_EVENT_GAMEPAD_AXIS_MOTION ? ev.gaxis.which : ev.gbutton.which;
+                auto *gp = SDL_GetGamepadFromID(id);
+                auto &runtime = padShortcuts[id];
+                runtime.state.Event(ev);
+                processPadShortcuts(gp, runtime);
                 break;
+            }
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (SDL_Gamepad *gp = SDL_OpenGamepad(ev.gdevice.which)) {
                     gamepads.push_back(gp);
                 }
                 break;
             case SDL_EVENT_GAMEPAD_REMOVED:
+                padShortcuts.erase(ev.gdevice.which);
                 for (auto it = gamepads.begin(); it != gamepads.end(); ++it) {
                     if (SDL_GetGamepadID(*it) == ev.gdevice.which) {
                         SDL_CloseGamepad(*it);
@@ -561,6 +613,19 @@ int RunWindowed(Port &port) {
             }
         }
 
+        for (auto *gp : gamepads) {
+            auto &runtime = padShortcuts[SDL_GetGamepadID(gp)];
+            runtime.state.Poll(gp);
+            processPadShortcuts(gp, runtime);
+        }
+        g_padContext = padContext();
+        if (keyboardConfig.enabled) {
+            keyboards.PollFocus();
+            keyboardConfig = keyboards.State().ResolveConfig(keyboardConfig);
+            for (const auto &press : keyboards.State().TakePresses())
+                if (!port.typing && KeyboardHotkeyAllowed(keyboardConfig, press))
+                    keyPress(press.key, press.mods, press.repeat, keyboards.State().ForPlayer(keyboardConfig, 0).data());
+        }
         if (touch.TakeMenuPress()) {
             toggleMenu();
         }
@@ -587,18 +652,30 @@ int RunWindowed(Port &port) {
         if (port.opt.moviePlay.empty() && !port.opt.autoPlay) {
             // The keyboard is every player's (each has the keys chosen for it); the first gamepad is player
             // 1's, a second player 2's, and so on
-            uint16_t pads[Machine::kMaxPlayers] = {};
+            std::array<uint32_t, Machine::kMaxPlayers> pads{}, keyboardMasks{}, gamepadMasks{};
+            std::array<uint16_t, Machine::kMaxPlayers> tags{};
             int keyCount = 0;
             const bool *keys = SDL_GetKeyboardState(&keyCount);
-            if (keysAfterChat) {
-                keysAfterChat = std::any_of(keys, keys + keyCount, [](bool down) { return down; });
-            }
-            if (!(SDL_GetModState() & SDL_KMOD_ALT) && !port.typing && !keysAfterChat) {
-                for (int player = 0; player < Players(); player++) {
-                    pads[player] |= ReadKeyboard(keys, player);
+            KeyboardState::Keys menuKeys{};
+            SDL_Keymod menuMods = SDL_GetModState();
+            if (keyboardConfig.enabled) {
+                for (int player = 0; player < Players(); ++player) {
+                    const auto &own = keyboards.State().ForPlayer(keyboardConfig, player);
+                    for (size_t k = 0; k < menuKeys.size(); ++k) menuKeys[k] = menuKeys[k] || own[k];
                 }
-                port.service = keys[SDL_SCANCODE_9] && !KeyBound(SDL_SCANCODE_9);
+                keys = menuKeys.data(); keyCount = static_cast<int>(menuKeys.size());
+                menuMods = keyboards.State().Modifiers(menuKeys);
             }
+            if (keysAfterChat) keysAfterChat = std::any_of(keys, keys + keyCount, [](bool down) { return down; });
+            if (!port.typing && !keysAfterChat) {
+                for (int player = 0; player < Players(); ++player)
+                    pads[player] = keyboardConfig.enabled ? ReadKeyboardPlayerButtons(keyboards.State(), keyboardConfig, player, g_bindings, g_hotkeys, Table())
+                                                          : ReadKeyboard(keys, player);
+                const auto &primary = keyboards.State().ForPlayer(keyboardConfig, 0);
+                port.service = HotkeyHeld(g_hotkeys, HotkeyAction::Service, keyboardConfig.enabled ? primary.data() : keys,
+                                         keyboardConfig.enabled ? keyboards.State().Modifiers(primary) : menuMods);
+            } else port.service = false;
+            keyboardMasks = pads;
             bool hurry = multi && keys[SDL_SCANCODE_F] && !KeyBound(SDL_SCANCODE_F);
             // (the camera moved by the arrows with Left Shift held, and by each gamepad's d-pad or stick with its click held)
             if (!port.menu.IsOpen()) {
@@ -618,48 +695,37 @@ int RunWindowed(Port &port) {
                         down += lower - higher;
                         // (the click was the camera's, not the menu's, once it has been moved with it)
                         if (right || left || lower || higher) {
-                            stickWaiting = false;
+                            for (int n : {static_cast<int>(HotkeyAction::Menu), kPadMenuAlt, kPadMenuChord}) {
+                                auto &runtime = padShortcuts[SDL_GetGamepadID(gp)];
+                                if (runtime.deferred[n]) { runtime.used[n] = true; runtime.deferred[n] = false; }
+                            }
                         }
                     }
                 }
                 port.zoom.Pan(std::clamp(across, -1, 1), std::clamp(down, -1, 1));
             }
             pads[0] |= touch.Read(port.menu.IsOpen());
-            bool trigger = false, both = false;
-            const bool stepOnTrigger = !PadInputBound(g_bindings, Table(), {-1, SDL_GAMEPAD_AXIS_LEFT_TRIGGER});
-            for (size_t i = 0; i < gamepads.size() && static_cast<int>(i) < Players(); i++) {
-                pads[i] |= ReadGamepad(gamepads[i], static_cast<int>(i));
-                const bool left = stepOnTrigger && SDL_GetGamepadAxis(gamepads[i], SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kDead;
-                trigger = trigger || left;
-                hurry = hurry || (multi && left);
-                // (while the game runs, the left trigger is its player's Tag: kTag; in a Multi game run, fast forward)
-                if (left && !port.paused && !multi) {
-                    pads[i] |= kTag;
-                }
-                both = both || (SDL_GetGamepadButton(gamepads[i], SDL_GAMEPAD_BUTTON_START) &&
-                                SDL_GetGamepadButton(gamepads[i], SDL_GAMEPAD_BUTTON_BACK));
+            bool trigger = false, menuShortcutHeld = false;
+            const auto assigned = ResolveGamepadAssignments(g_gamepadAssignments, DescribeGamepads(gamepads));
+            for (auto *gp : gamepads) {
+                const int player = AssignedGamepadPlayer(SDL_GetGamepadID(gp), assigned);
+                if (player < 0 || player >= Players()) continue;
+                gamepadMasks[player] = ReadGamepad(gp, player);
+                pads[player] |= gamepadMasks[player];
+                trigger = trigger || ShortcutHeld(gp, player, static_cast<int>(HotkeyAction::Step));
+                hurry = hurry || ShortcutHeld(gp, player, kPadFastForward);
+                port.service = port.service || ShortcutHeld(gp, player, static_cast<int>(HotkeyAction::Service));
+                if (ShortcutHeld(gp, player, kPadTag)) tags[player] = kTag;
+                for (int n : {static_cast<int>(HotkeyAction::Menu), kPadMenuAlt, kPadMenuChord})
+                    menuShortcutHeld = menuShortcutHeld || ShortcutHeld(gp, player, n);
             }
-            // The left trigger goes on by one frame (held: frame after frame, after a moment), once the game
-            // has been stopped: it does not stop it, so a touch of it while playing does nothing
             port.hurry = hurry && !port.menu.IsOpen();
             triggerHeld = trigger && port.paused ? triggerHeld + 1 : 0;
-            if (!port.menu.IsOpen() && (triggerHeld == 1 || (triggerHeld > 24 && triggerHeld % 4 == 0))) {
-                port.Key('o');
-            }
-            uint16_t all = 0;
-            for (const uint16_t one : pads) {
-                all |= one;
-            }
-            uint16_t pressed = all & ~previousPad;
+            if (!port.menu.IsOpen() && triggerHeld > 24 && triggerHeld % 4 == 0) port.Key('o');
+            uint32_t all = 0;
+            for (uint32_t one : pads) all |= one;
+            uint32_t pressed = all & ~previousPad;
             previousPad = all;
-            // Start and Select held together open and close the menu, whatever they are bound to (the second
-            // of them to go down is not also a press in the menu; neither reaches the game until let go)
-            if (both && !bothHeld) {
-                toggleMenu();
-                pressed = 0;
-                heldAtClose = previousPad;
-            }
-            bothHeld = both;
             // The menu's buttons are the same whatever the game's are set to: the arrows, the d-pad and the
             // left stick (and the game's own directions); Space, Enter and A choose; Backspace and B go back
             unsigned menuNow = 0;
@@ -667,7 +733,7 @@ int RunWindowed(Port &port) {
             menuNow |= (previousPad & kDown) || keys[SDL_SCANCODE_DOWN] ? recomp::kMenuDown : 0;
             menuNow |= (previousPad & kLeft) || keys[SDL_SCANCODE_LEFT] ? recomp::kMenuLeft : 0;
             menuNow |= (previousPad & kRight) || keys[SDL_SCANCODE_RIGHT] ? recomp::kMenuRight : 0;
-            menuNow |= keys[SDL_SCANCODE_SPACE] || (keys[SDL_SCANCODE_RETURN] && !(SDL_GetModState() & SDL_KMOD_ALT)) ? recomp::kMenuConfirm : 0;
+            menuNow |= keys[SDL_SCANCODE_SPACE] || (keys[SDL_SCANCODE_RETURN] && !(menuMods & SDL_KMOD_ALT)) ? recomp::kMenuConfirm : 0;
             menuNow |= keys[SDL_SCANCODE_BACKSPACE] ? recomp::kMenuBack : 0;
             for (SDL_Gamepad *gp : gamepads) {
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_UP) ? recomp::kMenuUp : 0;
@@ -680,7 +746,17 @@ int RunWindowed(Port &port) {
             menuNow |= touch.Menu();
             unsigned menuPressed = menuNow & ~previousMenu;
             previousMenu = menuNow;
-            if (both) {
+            const unsigned direction = menuNow & (recomp::kMenuUp | recomp::kMenuDown | recomp::kMenuLeft | recomp::kMenuRight);
+            const uint64_t now = SDL_GetTicksNS();
+            if (!port.menu.IsOpen() || direction != menuRepeatDirection || !direction) {
+                menuRepeatDirection = direction;
+                menuRepeatAt = now + 300000000ull;
+            } else if (now >= menuRepeatAt) {
+                menuPressed |= direction;
+                menuRepeatAt = now + 45000000ull;
+            }
+            if ((menuPressed & (recomp::kMenuLeft | recomp::kMenuRight)) && (menuMods & SDL_KMOD_SHIFT)) menuPressed |= recomp::kMenuFast;
+            if (menuShortcutHeld) {
                 menuPressed = 0;
             }
             if (port.menu.IsOpen()) {
@@ -692,7 +768,7 @@ int RunWindowed(Port &port) {
                     menuDirty = true;
                 }
                 if (!port.menu.IsOpen()) {
-                    heldAtClose = previousPad;
+                    releaseAtClose = true;
                 }
             } else if (port.leaving) {
                 // (online, "Leave the match?": Confirm leaves it, Back stays; this side's player stands still meanwhile)
@@ -701,11 +777,16 @@ int RunWindowed(Port &port) {
                 } else if (menuPressed & recomp::kMenuBack) {
                     port.leaving = false;
                 }
-                heldAtClose = previousPad;
+                releaseAtClose = true;
             }
-            heldAtClose &= previousPad;
-            for (int player = 0; player < Machine::kMaxPlayers; player++) {
-                port.pad[player] = pads[player] & ~heldAtClose;
+            if (releaseAtClose) { heldAtClose = pads; releaseAtClose = false; }
+            const auto options = KeyboardActionOptions(keyboardConfig, CurrentInputProfile());
+            InputTraceProfile(options, g_bindings);
+            for (int player = 0; player < Machine::kMaxPlayers; ++player) {
+                heldAtClose[player] &= pads[player];
+                port.pad[player] = inputProcessor.Apply(player, pads[player] & ~heldAtClose[player], port.frame, options) | tags[player];
+                InputTracePlayer(keyboards.State(), keyboardConfig, player, keyboardMasks[player], gamepadMasks[player],
+                                 heldAtClose[player], port.pad[player], port.menu.IsOpen(), port.paused);
             }
         }
 
@@ -764,6 +845,11 @@ int RunWindowed(Port &port) {
         const double pace = port.paused ? 1.0 : static_cast<double>(rate.frames) / rate.ticks;
         const bool ran = port.Tick();
 
+        if (audioEpoch != port.audioEpoch) {
+            audioEpoch = port.audioEpoch; boardEqualizer.Reset(); musicEqualizer.Reset();
+            if (audio) SDL_ClearAudioStream(audio);
+            if (music) SDL_ClearAudioStream(music);
+        }
         if (audio && silent != (port.menu.muted || audioLog)) {
             silent = port.menu.muted || audioLog;
             SDL_SetAudioStreamGain(audio, silent ? 0.0f : 1.0f);
@@ -775,7 +861,7 @@ int RunWindowed(Port &port) {
             // touch slower when it is running out (a fraction of a percent, far too little to hear), which
             // keeps a frame or two of it waiting: no gaps, no growing delay.
             // (Slowed, the sound is played slower by as much; faster, faster.)
-            double waiting = SDL_GetAudioStreamQueued(audio) / (4.0 * QSound::kSampleRate) / pace;
+            double waiting = SDL_GetAudioStreamQueued(audio) / (8.0 * QSound::kSampleRate) / pace;
             // (When much more than that is waiting (the game caught up after being held up, say) what waits
             // is thrown away: a click once, rather than sound that stays late for the seconds it would take
             // to play it off.)
@@ -792,7 +878,8 @@ int RunWindowed(Port &port) {
                         static_cast<unsigned long long>(port.frame), waiting * 1000, audioLeast * 1000, ratio, audioDropped);
                 audioLeast = 1;
             }
-            SDL_PutAudioStreamData(audio, made.data(), static_cast<int>(made.size() * sizeof(int16_t)));
+            boardEqualizer.ProcessS16(made, boardMade, QSound::kSampleRate, CurrentEqualizer());
+            SDL_PutAudioStreamData(audio, boardMade.data(), static_cast<int>(boardMade.size() * sizeof(float)));
         }
         made.clear();
         if (ran && port.soundtrackOn && port.soundtrack.Any()) {
@@ -825,6 +912,7 @@ int RunWindowed(Port &port) {
                 }
                 const double ratio = (1.0 + std::clamp((waiting - kAudioWaiting) * 0.5, -0.02, 0.02)) * pace;
                 SDL_SetAudioStreamFrequencyRatio(music, static_cast<float>(ratio));
+                musicEqualizer.ProcessFloat(musicMade, musicSpec.freq, CurrentEqualizer());
                 SDL_PutAudioStreamData(music, musicMade.data(), static_cast<int>(musicMade.size() * sizeof(float)));
             }
         }
@@ -835,7 +923,7 @@ int RunWindowed(Port &port) {
         presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where, isZoomed ? &zoomed : nullptr);
 
         if (!port.opt.unthrottled && !FastForward()) {
-            nextFrame += static_cast<uint64_t>(kFrameNs);
+            nextFrame += static_cast<uint64_t>(1e9 / port.machine->refreshHz);
             const uint64_t now = SDL_GetTicksNS();
             if (nextFrame > now) {
                 SDL_DelayPrecise(nextFrame - now);

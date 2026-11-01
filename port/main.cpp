@@ -10,6 +10,7 @@
 #include "../runtime/native_z80.h"
 #include "../runtime/state.h"
 #include "hud.h"
+#include "input_trace.h"
 #include "../runtime/board.h"
 #include "../fight/battle.h"
 #include "png_write.h"
@@ -82,7 +83,7 @@ bool Movie::Save(const std::string &path) const {
 }
 
 namespace {
-    constexpr uint32_t kStateVersion = 8; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy;
+    constexpr uint32_t kStateVersion = 9; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy;
                                           // 8: widescreen's camera a frame ago)
 
     bool ReadFile(const std::string &path, std::vector<uint8_t> &data) {
@@ -141,11 +142,13 @@ void RegisterPortFeatures() {
                                   "with cheats on, the port's own code for some routines runs, and the timing there is close "
                                   "but not exact.",
                                   0});
+    /* The enhanced per-player autofire in Controllers supersedes this simpler upstream option.
     // (rapid_fire: Port::RapidFire)
     TheGame().features.push_back({"rapid_fire", "Game", "Rapid fire",
                                   "A button held down is pressed again and again (fifteen times a second), for the first button or "
                                   "for all of them. The first press is seen at once, as without it.",
                                   0, {"Off", "First button", "Every button"}});
+    */
     // (display_*: how the picture is fitted to the window, present.h; the first of each is how it always was)
     TheGame().features.push_back({"display_scaling", "Display", "Scaling",
                                   "Sharp: as large as fits, each pixel a crisp block. Whole pixels: every pixel the same whole "
@@ -337,7 +340,7 @@ bool Port::Init(std::string &error) {
     // The sound program as ordinary code where there is one for it, unless the Z80's code is what is being
     // looked at
     if (opt.sound.empty()) {
-        opt.sound = machine->soundDriver && opt.cpu == "native" && opt.recordEntries.empty() ? "driver" : "z80";
+        opt.sound = "z80"; // the native Z80 can change clocks live; a high-level driver has no CPU budget
     }
     if (opt.sound == "z80") {
         machine->soundSide = Machine::SoundSide::Z80;
@@ -347,6 +350,13 @@ bool Port::Init(std::string &error) {
         error = machine->soundDriver ? "--sound: driver, z80 or check" : "--sound: this game's sound program is not one there is a driver for";
         return false;
     }
+    resetSoundSide = machine->soundSide;
+#ifdef GAME_PLAYERS
+    menu.players = GAME_PLAYERS[0] ? atoi(GAME_PLAYERS) : 2;
+#endif
+    LoadCurrentTuning(opt.settingsPath);
+    LoadCurrentEqualizer(opt.settingsPath);
+    ApplyTuning();
     machine->soundCpu.recording = !opt.recordEntries.empty();
     SetRewrites(opt.checkRewrites, opt.noRewrites);
     machine->cpu.watchLow = opt.watchLow;
@@ -546,7 +556,13 @@ void Port::MenuAct(Menu::Action action) {
         return;
     case Menu::Action::Reset:
         EndSessionFeatures();
-        machine->Reset();
+        machine->soundSide = resetSoundSide;
+        machine->Reset(); ++audioEpoch;
+        paused = false;
+        steps = coinFrames = start2Frames = testFrames = 0;
+        SetHud({});
+        SetBoxes({});
+        ApplyTuning();
         menu.Close();
         return;
     case Menu::Action::Quit:
@@ -590,6 +606,7 @@ void Port::Key(char key, unsigned n) {
         return; // (online: only the leave question, and the zoom's, which does nothing: Zoom::Forbid)
     }
     switch (key) {
+    case 'r': MenuAct(Menu::Action::Reset); break;
     case 'p':
         paused = !paused;
         steps = 0;
@@ -839,6 +856,7 @@ bool Port::Tick() {
 void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) const {
     const int across = ShownWidth();
     pixels.assign(machine->Picture(), machine->Picture() + across * Video::kHeight);
+    pictureTuning.Apply(pixels.data(), pixels.size(), CurrentTuning());
     DrawHud(pixels.data(), across, Video::kHeight, panels);
     // A line at the bottom, in the middle (`up` lines higher)
     auto status = [&](const char *text, int up) {
@@ -1039,9 +1057,13 @@ void Port::MenuPicture(std::vector<uint32_t> &pixels, uint32_t &width, uint32_t 
 }
 
 std::string Port::StatePath(int slot) const {
-    const size_t slash = opt.eepromPath.find_last_of('/');
-    const std::string folder = slash == std::string::npos ? "" : opt.eepromPath.substr(0, slash + 1);
-    return folder + "state" + std::to_string(slot) + ".bin";
+    const std::string name = "state" + std::to_string(slot) + ".bin";
+    const auto folder = std::filesystem::path(opt.eepromPath).parent_path();
+    const auto preferred = folder / name;
+    const auto legacy = folder.parent_path() / name;
+    // Earlier Windows builds put these beside settings.ini because only '/' was recognized.
+    if (!std::filesystem::exists(preferred) && std::filesystem::exists(legacy)) return legacy.string();
+    return preferred.string();
 }
 
 bool Port::SaveState(const std::string &path, std::string &error) {
@@ -1050,6 +1072,10 @@ bool Port::SaveState(const std::string &path, std::string &error) {
     ar.Mark(0x43505332);
     uint32_t version = kStateVersion;
     ar.Pod(version);
+    uint32_t audioClock = static_cast<uint32_t>(std::lround(machine->audioCpuPercent * 10));
+    uint32_t soundBackend = static_cast<uint32_t>(machine->soundSide);
+    ar.Pod(audioClock);
+    ar.Pod(soundBackend);
     machine->Serialize(ar);
     if (TheGame().state) {
         TheGame().state(ar);
@@ -1062,6 +1088,7 @@ bool Port::SaveState(const std::string &path, std::string &error) {
 }
 
 bool Port::LoadState(const std::string &path, std::string &error) {
+    ++audioEpoch;
     std::vector<uint8_t> data;
     if (!ReadFile(path, data)) {
         error = "cannot read " + path;
@@ -1071,19 +1098,43 @@ bool Port::LoadState(const std::string &path, std::string &error) {
     ar.Mark(0x43505332);
     uint32_t version = 0;
     ar.Pod(version);
+    uint32_t nextWord = 0;
+    if (data.size() >= 12) std::memcpy(&nextWord, data.data() + 8, 4);
+    // Local 013 used version 6 for an eight-byte clock header. Official version 6 instead
+    // starts with MACH. Distinguish by content, never guess from the version alone.
+    const bool legacyInputLab = version == 6 && nextWord >= 250 && nextWord <= 4000;
+    const bool extended = version >= 9 || legacyInputLab;
     const bool known = version >= 5 && version <= kStateVersion;
-    ar.version = version;
+    ar.version = legacyInputLab ? 5 : version;
+    if (ar.Ok() && known && extended) {
+        uint32_t clock = 1000, backend = 0; ar.Pod(clock); ar.Pod(backend);
+        if (clock < 250 || clock > 4000 || backend > static_cast<uint32_t>(Machine::SoundSide::Check)) {
+            error = "Invalid audio clock header"; return false;
+        }
+        machine->audioCpuPercent = clock / 10.0;
+        machine->soundSide = static_cast<Machine::SoundSide>(backend);
+    }
     if (ar.Ok() && known) {
         machine->Serialize(ar);
-        if (TheGame().state) {
+        if (version == 5) {
+            // The old high-level path advanced the Z80 clock without executing its PC.
+            machine->soundSide = machine->soundDriver && machine->soundCpu.pc == 0 ? Machine::SoundSide::Driver : Machine::SoundSide::Z80;
+        }
+        if (legacyInputLab) {
+            // The new session system has different auxiliary metadata; initialize its caches
+            // while retaining the imported board's complete RAM, CPU, picture and sound state.
+            SetHud({});
+            SetBoxes({});
+        } else if (TheGame().state) {
             TheGame().state(ar);
         }
     }
     if (!ar.Ok() || !known) {
         error = path + " is not a state this build wrote";
-        machine->Reset();
+        machine->Reset(); ++audioEpoch;
         return false;
     }
+    ApplyTuning();
     return true;
 }
 
@@ -1570,6 +1621,7 @@ void Port::PumpHost() {
 }
 
 void Port::MatchComing() {
+    machine->SetClocks(100, 100, Machine::kFramesPerSecond);
     fprintf(stderr, "online: someone joined: the match starts from the board's reset\n");
     ownFeatures.clear();
     for (const Feature &feature : TheGame().features) {
@@ -1581,7 +1633,7 @@ void Port::MatchComing() {
     steps = 0;
     typing = false;
     EndSessionFeatures();
-    machine->Reset();
+    machine->Reset(); ++audioEpoch;
     machine->audio.clear();
     zoom.Forbid();
     net = std::move(waitingHost); // (Netplay::Waiting goes on, as the match's)
@@ -1654,6 +1706,7 @@ bool Port::StartOnline(std::string &error) {
         return false;
     }
     net = std::make_unique<Netplay>(opt.net);
+    machine->SetClocks(100, 100, Machine::kFramesPerSecond);
     zoom.Forbid(); // (both players see the whole picture, as the board shows it)
     if (opt.headless && !net->Arcade()) {
         if (!net->Connect(*this, error)) {
@@ -1684,7 +1737,7 @@ void Port::Again(const std::string &why) {
         settings.inviteName.clear();
         opt.net = settings;
         EndSessionFeatures();
-        machine->Reset();
+        machine->Reset(); ++audioEpoch;
         machine->audio.clear();
     }
     fprintf(stderr, "online: %s Waiting for the match again.\n", why.c_str());
@@ -1754,7 +1807,16 @@ void Port::RapidFire() {
     }
 }
 
+void Port::ApplyTuning() {
+    const auto &tuning = CurrentTuning();
+    menu.audioCpuLive = machine->soundSide == Machine::SoundSide::Z80;
+    if (net) { machine->SetClocks(100, 100, Machine::kFramesPerSecond); return; }
+    const double audio = machine->soundSide == Machine::SoundSide::Z80 ? tuning.Get(Tune::AudioCpu) : 100;
+    machine->SetClocks(tuning.Get(Tune::MainCpu), audio, tuning.Get(Tune::Refresh));
+}
+
 void Port::RunFrame() {
+    ApplyTuning();
     ClearSpareRan();
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
@@ -1811,7 +1873,7 @@ void Port::RunFrame() {
         menu.Close();
     }
     memcpy(machine->players, pad, sizeof(pad));
-    RapidFire();
+    // Host controls have already passed through the single per-player autofire processor.
     if (coinFrames > 0) {
         coinFrames--;
         machine->players[0] |= kCoin;
@@ -1827,6 +1889,7 @@ void Port::RunFrame() {
     }
     uint16_t pressed[Machine::kMaxPlayers]; // (for run-ahead's frames)
     memcpy(pressed, machine->players, sizeof(pressed));
+    InputTraceGame("GAME_INPUT", frame, machine->players[0], machine->players[1]);
 
     std::string path, error;
     if (!net && AtFrame(opt.stateLoad, frame, path) && !LoadState(path, error)) {
@@ -1910,6 +1973,12 @@ void Port::Finish() {
     if (net && !connecting) {
         net->Leave();
         net->Report(true);
+    }
+    if (opt.stats) {
+        fprintf(stderr, "timing: maincpu=%.1f%% audiocpu=%.1f%% refresh=%.9f Hz maincycles=%llu audiocycles=%llu backend=%s\n",
+            machine->mainCpuPercent, machine->audioCpuPercent, machine->refreshHz,
+            static_cast<unsigned long long>(machine->cpu.cycles), static_cast<unsigned long long>(machine->soundCpu.cycles),
+            machine->soundSide == Machine::SoundSide::Z80 ? "z80" : "driver");
     }
     if (hashFile) {
         fclose(hashFile);
@@ -2222,6 +2291,8 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             // session, switched in the game's menu only, are not in it)
             fputs(port::LauncherFeatureList().c_str(), stdout);
             exit(0);
+        } else if (a == "--hotkeys") {
+            o.hotkeysPath = next();
         } else if (a == "--settings") {
             o.settingsPath = next();
         } else if (a == "--shader") {
@@ -2294,8 +2365,11 @@ bool StartLauncher() {
     // (the launcher's own folder and file; the collection's keeps each game's file in a section of its own. In
     // portable mode the folder is in user/ beside the launcher, as the launcher has it: recomp-common/folders.h)
     const char *name = collection ? "CPS-2 Recomp" : GAME_NAME;
-    std::filesystem::path folder = recomp::PortableFolder(base);
-    if (!folder.empty()) {
+    const bool inputLabPortable = std::filesystem::exists(std::filesystem::path(base) / "input-lab-portable.txt");
+    std::filesystem::path folder = inputLabPortable ? std::filesystem::path(base) / "user" : recomp::PortableFolder(base);
+    if (inputLabPortable) {
+        // The existing collection's data root has no extra application-name directory.
+    } else if (!folder.empty()) {
         folder /= std::filesystem::u8path(name);
     } else if (char *pref = SDL_GetPrefPath("", name)) {
         folder = pref;
@@ -2401,6 +2475,9 @@ int main(int argc, char **argv) {
     const auto begin = std::chrono::steady_clock::now();
     if (p.opt.headless) {
         std::vector<int16_t> sound;
+        port::Equalizer boardEqualizer, musicEqualizer;
+        std::vector<float> boardMade;
+        uint64_t audioEpoch = p.audioEpoch;
         std::vector<float> music, musicMade;
         int musicRate = 0;
         // A picture as the window draws it (--present-test, --present-every): through the GPU path, read back, written
@@ -2444,11 +2521,15 @@ int main(int argc, char **argv) {
                 }
             }
             if (!p.opt.audioDump.empty()) {
-                sound.insert(sound.end(), p.machine->audio.begin(), p.machine->audio.end());
+                if (audioEpoch != p.audioEpoch) { boardEqualizer.Reset(); musicEqualizer.Reset(); audioEpoch = p.audioEpoch; }
+                boardEqualizer.ProcessS16(p.machine->audio, boardMade, QSound::kSampleRate, port::CurrentEqualizer());
+                for (float sample : boardMade) sound.push_back(port::Equalizer::Quantize(sample));
             }
             if (!p.opt.soundtrackDump.empty() && p.soundtrackOn) {
                 // (silence where nothing plays, so that the file's time is the game's; at the first song's rate)
+                if (audioEpoch != p.audioEpoch) { boardEqualizer.Reset(); musicEqualizer.Reset(); audioEpoch = p.audioEpoch; }
                 p.soundtrack.Make(p.machine->soundtrack.state, !FastForward(), musicMade);
+                musicEqualizer.ProcessFloat(musicMade, p.soundtrack.Rate(), port::CurrentEqualizer());
                 musicRate = musicRate ? musicRate : (musicMade.empty() ? 0 : p.soundtrack.Rate());
                 const size_t due = musicRate ? static_cast<size_t>(p.frame * (musicRate / Machine::kFramesPerSecond)) * 2 : 0;
                 if (music.size() + musicMade.size() < due) {
