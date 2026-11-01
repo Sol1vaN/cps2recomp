@@ -1,34 +1,30 @@
-# Inventario y estado frente al upstream
+# Upstream comparison and file inventory
 
-## Dos referencias distintas
+English | [Español](UPSTREAM_DIFFERENCES.es.md)
 
-- Base de juego validada: **1.2.0**, [`f1212bca`](https://github.com/tmcleroy/cps2recomp/commit/f1212bca038f543e30fb106d8f88dabf30374df5).
-- Cabeza oficial observada al publicar (2026-11-01): [`ba4f4e50`](https://github.com/tmcleroy/cps2recomp/commit/ba4f4e504e589fdc40653323581a1b3bf2c4ebf0).
-- Esa cabeza tiene **11 commits** posteriores a la base. No están mezclados en Input Lab 018.
-- `input-lab` contiene la build personalizada; `main` conserva el upstream copiado al crear el fork.
+- User-tested game base: **1.2.0**, [`f1212bca`](https://github.com/tmcleroy/cps2recomp/commit/f1212bca038f543e30fb106d8f88dabf30374df5).
+- Upstream head observed on 2026-11-01: [`ba4f4e50`](https://github.com/tmcleroy/cps2recomp/commit/ba4f4e504e589fdc40653323581a1b3bf2c4ebf0), eleven commits later.
+- Those later changes are **not merged into Input Lab 018**. `input-lab` is the custom branch; `main` preserves the upstream copy made when forking.
 
-La comparación funcional principal es con la base reproducible probada, no una afirmación de que
-Input Lab incluya todo el `main` oficial a cualquier fecha futura.
-[Cambios oficiales base → cabeza observada](https://github.com/tmcleroy/cps2recomp/compare/f1212bca038f543e30fb106d8f88dabf30374df5...ba4f4e504e589fdc40653323581a1b3bf2c4ebf0).
+The [functional comparison](INPUT_LAB_CHANGES.md) uses the reproducible tested base, not a moving claim
+that the fork includes every future upstream improvement. [Compare the two official references](https://github.com/tmcleroy/cps2recomp/compare/f1212bca038f543e30fb106d8f88dabf30374df5...ba4f4e504e589fdc40653323581a1b3bf2c4ebf0).
 
-## Novedades oficiales posteriores pendientes de integrar
+## Later official changes awaiting integration
 
-Según el changelog y los commits de esa cabeza:
-
-| Novedad oficial | Situación de Input Lab 018 |
+| Official improvement | Input Lab 018 status |
 |---|---|
-| VSync opcional en Display, preservando el ritmo de la placa | No se incorporó esta nueva opción oficial. |
-| Captura F12 de la imagen presentada | No se incorporó el nuevo acceso/camino oficial de captura. Las herramientas headless anteriores permanecen. |
-| `gamecontrollerdb.txt` para mandos no reconocidos por SDL | No se incorporó este nuevo cargador oficial; la asignación física y ejes de Input Lab son un cambio independiente. |
-| Corrección del nombre de carpeta de X-Men COTA en Windows | No se incorporó ese parche oficial; el modo portátil propio `user/xmcota` pasó las pruebas de arranque locales. |
-| Proxy del sistema Windows para servicio online/updates | No se incorporó ese soporte oficial posterior. |
-| Aviso/descarga de nueva versión en Android | No integrado; el actualizador oficial está intencionadamente desactivado en el fork. |
-| Ajuste de exclusión de ficheros generados del ejemplo | No integrado. |
+| Optional Display VSync, retaining board pacing | Not incorporated. |
+| F12 captures the presented picture | New official shortcut/path not incorporated; earlier headless capture tools remain. |
+| gamecontrollerdb.txt for SDL-unrecognized pads | New loader not incorporated; physical assignment/signed axes are independent fork features. |
+| Windows X-Men COTA folder correction | Not incorporated; custom portable user/xmcota passed local start checks. |
+| Windows system proxy for online/updates | Not incorporated. |
+| Android update notification/download | Not incorporated; the fork deliberately disables the stock updater. |
+| Excluding generated example files | Not incorporated. |
 
-No se deben reemplazar `recomp-common` o el frontend completos para incorporar estas novedades:
-colisionarían con teclados, atajos, perfiles y persistencia propios. Requieren integración y nuevas pruebas.
+Replacing the whole frontend or recomp-common would overwrite custom input, shortcuts, profiles and
+persistence. Future integration needs a reviewed merge and fresh validation.
 
-### Commits oficiales posteriores
+### Later upstream commits
 
 - [`ba4f4e50`](https://github.com/tmcleroy/cps2recomp/commit/ba4f4e504e589fdc40653323581a1b3bf2c4ebf0) Merge pull request #218 from tmcleroy/vsync-option
 - [`8165d75e`](https://github.com/tmcleroy/cps2recomp/commit/8165d75e68958d51205866c1252bedb0dab131f6) Display's VSync: each picture at the screen's refresh, never torn (#185)
@@ -42,7 +38,7 @@ colisionarían con teclados, atajos, perfiles y persistencia propios. Requieren 
 - [`46725ce5`](https://github.com/tmcleroy/cps2recomp/commit/46725ce5a8eb18784870b73d9011bf02c9e73434) recomp-common synced to main (#45 merged)
 - [`309ee318`](https://github.com/tmcleroy/cps2recomp/commit/309ee31854de0f1d769a2afe9abb9fe3e30e343d) Android says when a new version is out (#209)
 
-## Archivos del upstream que cambiaron después de la base
+## Upstream files changed after the tested base
 
 - `M` `CHANGELOG.md`
 - `M` `docs/FEATURES.md`
@@ -66,7 +62,7 @@ colisionarían con teclados, atajos, perfiles y persistencia propios. Requieren 
 - `M` `recomp-common/launcher/src/update.h`
 - `A` `recomp-common/proxy.h`
 
-## Inventario completo del delta propio frente a la base validada
+## Complete custom file inventory against the tested base
 
 Cada archivo añadido/modificado está enumerado. Los detalles de comportamiento están en [INPUT_LAB_CHANGES.md](INPUT_LAB_CHANGES.md).
 
@@ -196,14 +192,13 @@ Cada archivo añadido/modificado está enumerado. Los detalles de comportamiento
 | Añadido | [runtime/damage_policy.h](../runtime/damage_policy.h) | Cheats / selección de personajes |
 | Modificado | [sound/driver.h](../sound/driver.h) | EQ / audio / atribución |
 
-## Qué se publica y qué se excluye
+## Published contents y qué se excluye
 
-Se parte del ZIP de fuentes de la build 018 y del historial oficial conservado. Se añaden README,
-esta documentación, un resumen sin datos personales de las pruebas y exclusiones `.gitignore`.
-Los scripts de traducción y el código fuente del port están incluidos; `input-lab/entries` contiene
-direcciones, no instrucciones de ROM. Se conservan GPL-3.0-only y los avisos BSD-3-Clause del EQ.
+The game source is the user-tested 018 source archive plus publication documentation, a sanitized
+validation summary and local-file exclusions. Translation tools and port sources are included.
+Historical input-lab/entries build inputs contain addresses rather than translated instructions; they
+are excluded from upstream contributions under upstream's policy. GPL-3.0 and EQ BSD-3-Clause notices remain.
 
-No se publica `work`, `out`, `migration`, `package_*`, ROMs, claves, programas descifrados/traducidos,
-binarios locales, perfiles personales, capturas de teclado, identificadores físicos, partidas o backups.
-Las modificaciones externas de MAMEPPK/PCSX2/DuckStation no forman parte de este fork de CPS2Recomp.
-Los cheats nuevos de CPS2Recomp sí están implementados y documentados en sus fuentes correspondientes.
+Local work/out/migration/package folders, ROMs, keys, decrypted/translated programs, local binaries,
+personal profiles, input traces, device identifiers, saves and backups are excluded. External MAMEPPK,
+PCSX2 and DuckStation changes are separate projects. The native custom cheats are implemented in this fork.

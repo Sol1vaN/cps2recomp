@@ -1,64 +1,50 @@
-# Reconstruir Input Lab 018
+# Building Input Lab 018 on Windows
 
-Base: v1.2.0, commit `f1212bca038f543e30fb106d8f88dabf30374df5`.
-El ZIP contiene las fuentes completas, incluidas las modificaciones de `recomp-common`.
-No ejecutar `tools/sync-common.sh`: reemplazaría las modificaciones propias.
-El parche adjunto se aplica con `git apply` sobre el commit indicado.
+English | [Español](BUILD.es.md)
 
-## Dependencias de la compilación de Windows
+Base: v1.2.0, `f1212bca038f543e30fb106d8f88dabf30374df5`. The fork includes its intentional
+recomp-common modifications. **Do not run tools/sync-common.sh over this branch.**
 
-- Python 3, CMake 3.28 o posterior y Ninja.
-- LLVM/Clang 22.1.8, destino x86_64-w64-windows-gnu, con sus cabeceras/librerías MinGW y windres.
-- SDL 3.4.16 (SDK con SDL3Config.cmake e import library), zlib 1.3.1.
-- Dear ImGui v1.92.9b e Inter 4.1; CMake descarga las revisiones oficiales si no se indican checkouts locales.
-- SDL3.dll y zlib1.dll en PATH para ejecutar el primer binario de descifrado.
-- Los conjuntos propios correspondientes a `games/*/game.cfg`. No se incluyen ROMs ni programas descifrados en las fuentes.
+## Dependencies
 
-Ejemplo, desde la raíz de las fuentes, sustituyendo las rutas por las de las dependencias:
+- Python 3, CMake 3.28+ and Ninja.
+- LLVM/Clang 22.1.8 for x86_64-w64-windows-gnu, MinGW headers/libraries and windres.
+- SDL 3.4.16 SDK with SDL3Config.cmake/import library, and zlib 1.3.1.
+- Dear ImGui v1.92.9b and Inter 4.1; CMake downloads the pinned official revisions unless local checkouts are specified.
+- SDL3.dll and zlib1.dll on PATH when running the initial decryption executable.
+- Your own matching sets as described by games/*/game.cfg. No ROMs, keys or decrypted programs are supplied.
+
+From the source root, replace the dependency paths:
 
 ```powershell
 $env:PYTHONUTF8 = '1'
 python -X utf8 input-lab/rebuild.py --roms 'D:/ROMs' --sdl 'D:/SDL3/cmake' --zlib-include 'D:/zlib/include' --zlib-library 'D:/zlib/lib/zlib.lib' --cc 'D:/llvm/bin/clang.exe' --cxx 'D:/llvm/bin/clang++.exe' --rc 'D:/llvm/bin/windres.exe' --jobs 4
 ```
 
-Opciones: `--cmake`, `--imgui`, `--inter`, `--games sfa2 puzzle_fighter`.
-El helper utiliza los mismos comandos de generación/CMake empleados para esta build;
-la reconstrucción completa desde cero mediante este helper no se ha repetido como una segunda compilación independiente.
-Los binarios salen en `out/rebuild/<id>` y `out/rebuild/launcher`.
-El primer ejecutable sin traducciones vuelca la ROM; los traductores generan el C++
-con las entradas de `input-lab/entries` y se recompila como código nativo.
-Vampire Savior Definitive necesita también el conjunto de Vampire Savior 2.
-No reutilizar `work` entre ROMs/revisiones distintas; usar otra copia de las fuentes.
+Optional: --cmake, --imgui, --inter, --games sfa2 puzzle_fighter. Output: out/rebuild/<id> and
+out/rebuild/launcher. The first untranslated executable dumps the user's ROM; the translators use local
+entries/ inputs to generate native C++, then rebuild. Definitive also needs the Vampire Savior 2 set.
+Do not share work/ between different games/revisions. The helper reproduces the commands used for this
+build; a second independent complete clean rebuild through the helper has not been claimed.
 
-## Pruebas
+## Tests
 
-Configurar `input-lab/tests` con las mismas dependencias y
-`-DINPUTLAB_CORE_LIBRARY=<ruta>/out/rebuild/core/libcps2_inputlab_core.a`.
-Construir y ejecutar `keyboard_tests --native`, `gamepad_tests`, `input_profile_tests`,
-`collection_input_tests`, `pad_hotkey_tests`, `equalizer_tests`; para daño, `sfa2_damage_tests work/sfa2/program.bin.data work/sfa2/program.bin`.
-Las DLL también deben estar disponibles al ejecutar las pruebas.
-Para los nuevos ports: `sfa_policy_tests`, `sfz2al_policy_tests` y `ssf2t_policy_tests`,
-cada uno con `work/<juego>/program.bin.data work/<juego>/program.bin`.
-El helper descubre también los hooks añadidos en `games/sfz2al/src` y los de fuentes compartidas.
-Para las paletas de Super Turbo: `ssf2t_colour_tests work/ssf2t/program.bin.data work/ssf2t/program.bin`.
-La prueba ejecuta el cargador original y comprueba las palabras de color copiadas en VRAM.
+Configure input-lab/tests with the same dependencies and
+`-DINPUTLAB_CORE_LIBRARY=<path>/out/rebuild/core/libcps2_inputlab_core.a`.
+Build/run keyboard_tests --native, gamepad_tests, input_profile_tests, collection_input_tests,
+pad_hotkey_tests and equalizer_tests. DLLs must be available when running them.
+Game policy tests take work/<game>/program.bin.data and work/<game>/program.bin:
+sfa_policy_tests, sfa2_damage_tests, sfz2al_policy_tests, ssf2t_policy_tests and ssf2t_colour_tests.
+The colour test runs the original palette loader and checks copied VRAM words.
 
-La distribución incluye los resultados de la comprobación de los 18 juegos, la prueba
-local de dos clientes en línea y las pruebas de regresión. Son pruebas automatizadas;
-no sustituyen una sesión real con dos teclados físicos y un mando.
+EQ tests compare the DSP with the attributed MAMEPPK oracle, including response, channel independence,
+block continuity and SDL conversion. Audio fixtures exercise flat, bypass, active board audio and 48 kHz
+custom music. Game hashes remain unchanged by EQ. Automated results do not replace real device playtests.
+See the [018 validation record](../docs/validation/inputlab-018.json).
 
-La prueba de EQ compara el DSP con los métodos originales de MAMEPPK conservados
-en `mame_equalizer_oracle.h`; comprueba respuesta en frecuencia, canales, continuidad
-entre bloques y la conversión SDL original frente al nuevo camino de coma flotante.
-La verificación de audio usa WAVs de SFA2 con ganancias planas, Bypass y ganancias
-activas, además de una banda sonora de prueba generada a 48 kHz. Los hashes del juego
-coinciden aunque el EQ sea distinto. El cambio no añade campos al estado guardado.
+## Packaging
 
-## Distribución
-
-Juntar los 18 ejecutables y el launcher con las DLL, licencias y shaders de la release
-oficial v1.2.0 verificada. Conservar el archivo `input-lab-portable.txt` para usar `user/<id>`.
-No distribuir `work/`, dumps, C++ traducido de las ROMs ni datos de juegos con las fuentes.
-Conservar las licencias originales y ofrecer estas fuentes bajo GPL-3.0.
-Incluir también `licenses/mame-equalizer.txt` y el `THIRD_PARTY_NOTICES.md` de estas fuentes
-en la distribución binaria; contienen la atribución y condiciones del DSP adaptado.
+Place the eighteen executables and launcher beside the required DLLs, licenses and shaders from the
+verified official v1.2.0 release. Retain input-lab-portable.txt to use user/<id>. Do not distribute work/,
+dumps or translated game C++. Retain all original licenses, GPL-3.0 source availability, and the EQ
+BSD-3-Clause attribution in licenses/mame-equalizer.txt and THIRD_PARTY_NOTICES.md.

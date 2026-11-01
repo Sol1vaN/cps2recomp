@@ -1,88 +1,77 @@
 # CPS-2 Recomp — Input Lab
 
+English | [Español](README.es.md)
+
 **Sol1vaN's customized fork of [tmcleroy/cps2recomp](https://github.com/tmcleroy/cps2recomp).**
-Version **1.2.0-inputlab.018**, based on upstream **1.2.0** / [`f1212bca`](https://github.com/tmcleroy/cps2recomp/commit/f1212bca038f543e30fb106d8f88dabf30374df5).
+Version **1.2.0-inputlab.018**, built on upstream **1.2.0**, commit [`f1212bca`](https://github.com/tmcleroy/cps2recomp/commit/f1212bca038f543e30fb106d8f88dabf30374df5).
 
-Independent physical keyboards on Windows, opposing-direction neutralization, per-game macros/autofire,
-editable keyboard/gamepad shortcuts, a five-band equalizer, timing/picture sliders and additional
-Street Fighter cheats. The upstream toolkit, games, training modes, renderer and online systems
-remain credited to Tommy McLeroy and their original contributors.
+Two friends can use separate physical keyboards with the same layout, without one keyboard releasing
+the other's held keys. Input Lab also adds optional direction neutralization, physical gamepad assignments,
+editable global shortcuts, per-game audio and picture controls, and additional Street Fighter cheats.
+The original toolkit, eighteen games, renderer, training modes and online system remain credited to
+Tommy McLeroy and their contributors. This is an independent fork, not an official release.
 
-**Source only: no ROM sets, keys, translated game programs, binary packages or personal settings.**
-Build with your own matching ROM sets. This fork is not an official upstream release.
+**No ROM sets, keys, decrypted programs, translated C++, binaries or personal settings are supplied.**
+Use your own matching game sets. The `input-lab` branch contains the customized build; `main` preserves
+upstream as copied when the fork was created. Later official changes have not silently been merged into
+the user-tested 018 game code: see [the exact comparison](docs/UPSTREAM_DIFFERENCES.md).
 
-## Documentación
+## Features
 
-- [Todas las diferencias funcionales y cheats](docs/INPUT_LAB_CHANGES.md).
-- [Inventario completo de archivos y novedades oficiales posteriores](docs/UPSTREAM_DIFFERENCES.md).
-- [Compilación de Input Lab en Windows](input-lab/BUILD.md).
-- [Historial y guía de las builds 014–018](input-lab/README.md).
-- [Resumen de pruebas locales de la build 018](docs/validation/inputlab-018.json).
-- [README oficial de la base 1.2.0](https://github.com/tmcleroy/cps2recomp/blob/f1212bca038f543e30fb106d8f88dabf30374df5/README.md).
-
-La rama **input-lab** contiene la versión personalizada. **main** conserva el upstream copiado al crear
-el fork. Se publica exactamente el código de juego validado de la build 018, con documentación y
-exclusiones de archivos locales añadidas. No se han mezclado silenciosamente novedades oficiales posteriores.
-
-## Qué añade este fork
-
-| Área | Cambios |
+| Feature | What it adds |
 |---|---|
-| Multiteclado Windows | RawInput independiente por interfaz y OR dentro del mismo dispositivo físico; los jugadores pueden usar las mismas teclas sin liberaciones cruzadas. |
-| Direcciones | Neutralize Opposing Directions (MAME), por juego/jugador: L+R y U+D se cancelan; L+D+R conserva D. |
-| Macros y autofire | PPP/KKK, cuatro Custom simultáneas por jugador y autofire por acción con demora 1–30 frames. |
-| Mandos | Asignación física por jugador; ambos sticks y sentidos de ejes; un solo mando puede controlar P2. |
-| Atajos globales | Teclado/mando editables y borrables; ESC fijo, Reset game, Guide/L3/Start+Select configurables. |
-| Audio | Game → Sound → Equalizer: cinco bandas paramétricas por juego, graves/agudos Shelf o Peak, Bypass y Reset All. |
-| Sliders | CPU principal/audio, refresco de video, brillo, contraste y gamma, guardados por juego. |
-| Cheats | Damage hits en cuatro juegos; Shin Akuma CPU, velocidad interna y paletas por jugador en Super Turbo; selección con START en los tres juegos originales. |
-| Launcher/datos | Ventana amplia con márgenes, Custom sin desbordes, modo portátil, importación de estados propios y versión de red diferenciada. |
+| [RawInput Multi Keyboard](docs/INPUT_LAB_CHANGES.md#rawinput-multi-keyboard) | Independent interface state and safe grouping of interfaces belonging to one physical keyboard. Same keys for different players, persistent device assignments. Windows only. |
+| [Neutralize Opposing Directions](docs/INPUT_LAB_CHANGES.md#neutralize-opposing-directions) | Optional per-game/player Left+Right and Up+Down cancellation, with MAME-style direction semantics. Includes per-game Custom combinations and autofire. |
+| [Physics Assignment Joysticks](docs/INPUT_LAB_CHANGES.md#physics-assignment-joysticks) | Assign a physical controller to a chosen player, including a lone gamepad on P2. Buttons, triggers and signed stick directions can be bound. |
+| [Global Bindable Hotkeys](docs/INPUT_LAB_CHANGES.md#global-bindable-hotkeys) | Editable and clearable keyboard/gamepad shortcuts, including Guide/L3/Start+Select and Reset game. Escape remains fixed. |
+| [Audio Equalizer](docs/INPUT_LAB_CHANGES.md#audio-equalizer) | Five-band parametric EQ at Game → Sound → Equalizer, saved independently for each game. |
+| [Sliders](docs/INPUT_LAB_CHANGES.md#sliders) | Per-game main/audio CPU clocks, video refresh, brightness, contrast and gamma. Inspired by MAMEPPK. |
+| [New Cheats](docs/CHEATS.md) | Live damage-profile equalization, Super Turbo boss selection/internal speed/native palettes, and START-based hidden-character selection. |
+| [Launcher Hardening](docs/INPUT_LAB_CHANGES.md#launcher-hardening) | Centered initial window with desktop margins, contained Custom controls, portable-data compatibility and safeguards for this fork's updates. |
 
-## Cheats propios
+“Physics Assignment Joysticks” is this fork's requested feature name; it means **physical device assignment**, not changes to game physics.
 
-Menú **Game → Cheats**, o página propia del juego en el launcher. Todos son por juego;
-los selectores P1/P2 también son independientes entre jugadores.
+## Screenshots
 
-| Juego / conjunto base validado | Opciones |
+See the [feature gallery](docs/SCREENSHOTS.md) for all eight features. These are captures of the actual
+Input Lab UI, not mockups. A screenshot explains the controls; it does not by itself prove device isolation,
+audio response or gameplay equivalence.
+
+## New Cheats: what each option actually does
+
+The [complete cheat guide](docs/CHEATS.md) explains every custom cheat, its choices, affected games,
+activation time and limits. The [Spanish guide](docs/CHEATS.es.md) contains the same explanations.
+
+| Game / validated base set | Custom cheats |
 |---|---|
-| SFA — `sfa`, Europe 950727 | Damage hits |
-| SFA2 — `sfa2u`, USA 960430 | Damage hits; formas ocultas con START |
-| SFZ2AL — `sfz2al`, Asia 960826 | Damage hits, incluido el tercer luchador de Dramatic Battle |
-| Super Turbo — `ssf2xjr1`, Japan 940223 | Damage hits; P1/P2 Select Character con Shin Akuma; Select Speed; P1/P2 Select Colour |
-| Vampire Savior — `vsavj`, Japan 970519 | Formas ocultas con START |
-| Puzzle Fighter — `spf2t`, Europe 960529 | Ciclo de personajes ocultos con START |
+| Street Fighter Alpha — `sfa`, Europe 950727 | Damage hits |
+| Street Fighter Alpha 2 — `sfa2u`, USA 960430 | Damage hits; Hidden characters with START |
+| Street Fighter Zero 2 Alpha — `sfz2al`, Asia 960826 | Damage hits, including Dramatic Battle's third fighter |
+| Super Street Fighter II Turbo — `ssf2xjr1`, Japan 940223 | Damage hits; P1/P2 Select Character, including Shin Akuma; Select Speed; P1/P2 Select Colour |
+| Vampire Savior — `vsavj`, Japan 970519 | Hidden characters with START |
+| Super Puzzle Fighter II Turbo — `spf2t`, Europe 960529 | Hidden-character cycle with START |
 
-**Damage hits:** Vanilla / Equal to human / Equal to CPU. Usa el perfil actual y su rango adaptativo,
-sin forzar el máximo ni cambiar la IA. Conserva modificadores de personaje, movimiento, bloqueo,
-vida, combo y azar. PvP normal y CPU vs CPU conservan Vanilla.
+All these cheats are game-specific. New cheat selectors start Off/Vanilla. Equal damage profiles do not
+make every character or move deal identical damage. The Shin Akuma bridge preserves native hitboxes,
+pushback and juggle rules; it is not a promise that every proposed combo is possible.
 
-**Super Turbo — Select Colour:** los modos LP/MP/HP y SSF2 primary dan negro a Akuma/Shin Akuma;
-LK/MK/HK, Start, Hold any P/K y SSF2 alternate dan gris oscuro. Los demás personajes mantienen
-sus diez colores. Elegir antes de la próxima ronda; Off deja de forzar la paleta.
-El retrato negro de Akuma no muestra el color de la pelea.
+## Getting started
 
-**Select Speed** controla el frameskip interno original, separado de overclock/Hz.
-**Select Character** se elige antes de confirmar personaje. El puente de Shin Akuma usa recursos
-del jefe CPU y comandos humanos; no modifica hitboxes, separación o juggle ni promete equivalencia
-1:1 de toda secuencia de combate. [Detalle de cada cheat](docs/INPUT_LAB_CHANGES.md#cheats-por-juego).
+Open `cps2recomp-launcher.exe`. Under Controllers, assign different physical keyboards to the players
+to reuse the same keys. No input logger is needed. This removes software interference between devices;
+each keyboard's own electrical rollover limits still apply. Global shortcuts and devices are shared across
+games; input options, cheats, sliders and EQ are saved per game.
 
-## Uso y compatibilidad
+See [Windows build instructions](input-lab/BUILD.md), [014–018 release notes](input-lab/README.md),
+[full functional differences](docs/INPUT_LAB_CHANGES.md), and [018 validation results](docs/validation/inputlab-018.json).
+Do not run `tools/sync-common.sh` on this customized branch: it would replace its intentional shared-UI changes.
 
-La variante se validó en **Windows x64**. RawInput multiteclado requiere Windows;
-no se declara validación de estos agregados en macOS, Linux o Android. El código oficial permanece.
-Para compilar: [input-lab/BUILD.md](input-lab/BUILD.md). **No ejecutar `tools/sync-common.sh`**
-sobre esta rama: reemplazaría sus modificaciones propias de `recomp-common`.
+The custom changes were validated on **Windows x64**. No equivalent validation is claimed for Linux,
+macOS or Android. Both online peers need the same Input Lab version. Online retains the official cheat
+restrictions and original clocks. The stock auto-updater is disabled so it cannot replace this fork with
+an official binary that lacks its additions.
 
-Abrir `cps2recomp-launcher.exe`. En Controllers, asignar un teclado físico distinto a cada jugador
-para reutilizar el mismo esquema. Esto no elimina los límites de rollover del hardware.
-Los atajos While playing son globales; los perfiles de juego y EQ se guardan por juego.
-Los cheats nuevos comienzan apagados y el EQ plano a 0 dB. No hace falta activar un logger.
-
-El actualizador automático oficial está desactivado para no reemplazar el fork con un binario stock.
-Para jugar en red ambos extremos necesitan la misma versión Input Lab; se mantienen las reglas
-oficiales de cheats y los relojes originales durante la partida online.
-
-## Juegos heredados de la base oficial
+## Games inherited from upstream
 
 | Game | ROM set | Notes |
 | --- | --- | --- |
@@ -105,19 +94,14 @@ oficiales de cheats y los relojes originales durante la partida online.
 | [**Alien vs. Predator**](games/avsp/README.md) (1994) | `avspu` (USA 940520) | Beat-'em-up: three players, a stage to start at, score attack |
 | [**Cadillacs and Dinosaurs**](games/dino/README.md) (1993, CPS-1) | `dino` (World 930201) | Beat-'em-up: three players, a stage to start at, score attack |
 
-## Pruebas y alcance
+## Validation and credits
 
-La build 018 compiló y arrancó los **18 juegos** desde su instalación final. Pasaron seis suites
-de regresión, las pruebas específicas de daño/jefe/velocidad, 396 casos/32 475 comprobaciones de
-paleta y el guardado/recarga del menú. Con Select Colour en Off, 2 100 imágenes coinciden con la 017.
-El usuario confirmó el funcionamiento de sus agregados jugando. Son resultados de pruebas locales,
-no una afirmación de que el CI público ya haya pasado ni de cobertura de todo hardware/combate.
-Los workflows originales se conservan, pero aún no se adaptaron a las diferencias intencionadas
-de `recomp-common` ni se validaron para las otras plataformas.
+Build 018 compiled and started all eighteen games from its final installation. Six regression suites,
+damage/boss/speed checks, 396 palette cases with 32,475 assertions, and menu save/reload checks passed.
+With Select Colour Off, 2,100 rendered frames matched build 017. These are local results for the complete
+018 build, not a claim that isolated upstream PRs or public CI have already passed the same checks.
+The user also confirmed the custom features through play. Hardware and combat coverage are not exhaustive.
 
-## Licencia y créditos
-
-[GPL-3.0-only](LICENSE). Se conservan los créditos originales de Tommy McLeroy y demás autores.
-El EQ adapta el DSP de Olivier Galibert de MAME/MAMEPPK, con [BSD-3-Clause](licenses/mame-equalizer.txt).
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) contiene las atribuciones completas.
-No hay afiliación con Capcom ni con el proyecto oficial.
+[GPL-3.0-only](LICENSE). Original credits remain intact. Audio Equalizer adapts Olivier Galibert's
+MAME/MAMEPPK DSP under [BSD-3-Clause](licenses/mame-equalizer.txt); see [third-party notices](THIRD_PARTY_NOTICES.md).
+No affiliation with Capcom or the official project is implied.
