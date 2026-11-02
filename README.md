@@ -105,3 +105,6 @@ The user also confirmed the custom features through play. Hardware and combat co
 [GPL-3.0-only](LICENSE). Original credits remain intact. Audio Equalizer adapts Olivier Galibert's
 MAME/MAMEPPK DSP under [BSD-3-Clause](licenses/mame-equalizer.txt); see [third-party notices](THIRD_PARTY_NOTICES.md).
 No affiliation with Capcom or the official project is implied.
+
+
+The [six upstream draft proposals](docs/UPSTREAM_PRS.md) include screenshots, test scope and the shared-library prerequisite.

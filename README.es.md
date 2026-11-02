@@ -133,3 +133,6 @@ de `recomp-common` ni se validaron para las otras plataformas.
 El EQ adapta el DSP de Olivier Galibert de MAME/MAMEPPK, con [BSD-3-Clause](licenses/mame-equalizer.txt).
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) contiene las atribuciones completas.
 No hay afiliación con Capcom ni con el proyecto oficial.
+
+
+Las [seis propuestas al proyecto oficial](docs/UPSTREAM_PRS.es.md) incluyen capturas, alcance de pruebas y dependencia compartida; están en borrador.
