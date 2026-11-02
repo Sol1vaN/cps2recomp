@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — RawInput Multi Keyboard
+
+Windows-only independent physical keyboards: two friends can use the same layout without cross-keyboard releases cancelling held directions, attacks or combinations. Interfaces are grouped only by verified PnP container identity; device assignments persist. Controllers shows assignments and Keys held. Player-scoped binds preserve the other layout. Hardware rollover limits still apply. Off retains the merged keyboard route. Shared UI requires the companion recomp-common controller-extension API.
+
 ## Unreleased
 
 - **VSync** (#185): a Display option (off unless chosen) that shows each picture at the screen's refresh, so it never
