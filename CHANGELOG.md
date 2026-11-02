@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Neutralize Opposing Directions
+
+Optional MAME-style opposing-direction cancellation per game and player, off in Pure. Left+Right and Up+Down cancel independently after input sources merge. Open Controllers in the in-game menu or use the launcher feature selector. No motion scripting, timing buffer or extra frame queue is added.
+
 ## Unreleased
 
 - **VSync** (#185): a Display option (off unless chosen) that shows each picture at the screen's refresh, so it never
