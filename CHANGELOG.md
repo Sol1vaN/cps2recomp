@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — New Cheats
+
+Per-game Damage hits policies for SFA, SFA2, SFZ2AL and Super Turbo; Super Turbo character/boss, palette and internal-speed selectors; START-based hidden-character selection. [Every option and its limits](docs/CHEATS.md). All new selectors default to Off/Vanilla.
+
 ## Unreleased
 
 - **VSync** (#185): a Display option (off unless chosen) that shows each picture at the screen's refresh, so it never
